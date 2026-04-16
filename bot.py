@@ -1532,7 +1532,11 @@ async def attack(
     ACTIVE_ATTACK_USERS.add(attacker.id)
     ACTIVE_ATTACK_USERS.add(cible.id)
     view = AttackView(attacker, cible)
-    await interaction.response.send_message(embed=view.build_embed(), view=view)
+    await interaction.response.send_message(
+        content=cible.mention,
+        embed=view.build_embed(),
+        view=view,
+    )
     view.message = await interaction.original_response()
 
 
