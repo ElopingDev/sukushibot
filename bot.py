@@ -38,7 +38,6 @@ ATTACK_COOLDOWN = timedelta(hours=5)
 GLOBAL_ATTACK_COOLDOWN = timedelta(minutes=30)
 CHANGEJOB_COOLDOWN = timedelta(days=1)
 PRISON_DURATION = timedelta(minutes=10)
-TEST_JAIL_DURATION = timedelta(minutes=15)
 PRISON_CHANCE = 0.15
 JOB_OPTIONS = {
     "mugger": "Braqueur",
@@ -371,8 +370,12 @@ def can_bypass_prison(member: discord.abc.User | discord.Member) -> bool:
     )
 
 
-async def ensure_not_in_prison(interaction: discord.Interaction) -> bool:
-    if can_bypass_prison(interaction.user):
+async def ensure_not_in_prison(
+    interaction: discord.Interaction,
+    *,
+    allow_staff_bypass: bool = False,
+) -> bool:
+    if allow_staff_bypass and can_bypass_prison(interaction.user):
         return True
 
     release_at = get_prison_release(interaction.user.id)
@@ -393,9 +396,12 @@ async def ensure_not_in_prison(interaction: discord.Interaction) -> bool:
     return False
 
 
-def prison_block():
+def prison_block(*, allow_staff_bypass: bool = False):
     async def predicate(interaction: discord.Interaction) -> bool:
-        return await ensure_not_in_prison(interaction)
+        return await ensure_not_in_prison(
+            interaction,
+            allow_staff_bypass=allow_staff_bypass,
+        )
 
     return app_commands.check(predicate)
 
@@ -1639,7 +1645,7 @@ async def blackjack(
 
 
 @bot.tree.command(name="mute", description="Timeout a member for a set duration.")
-@prison_block()
+@prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(moderate_members=True)
 @app_commands.checks.has_permissions(moderate_members=True)
 async def mute(
@@ -1687,11 +1693,7 @@ async def mute(
     )
 
 
-@bot.tree.command(name="jail", description="Envoie un membre en prison pendant 15 minutes pour test.")
-@prison_block()
-@app_commands.default_permissions(moderate_members=True)
-@app_commands.checks.has_permissions(moderate_members=True)
-async def jail(
+"""Removed temporary /jail command.
     interaction: discord.Interaction,
     member: discord.Member,
     reason: str | None = None,
@@ -1727,8 +1729,9 @@ async def jail(
     )
 
 
+"""
 @bot.tree.command(name="unmute", description="Remove a timeout from a member.")
-@prison_block()
+@prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(moderate_members=True)
 @app_commands.checks.has_permissions(moderate_members=True)
 async def unmute(
@@ -1768,7 +1771,7 @@ async def unmute(
 
 
 @bot.tree.command(name="kick", description="Kick a member from the server.")
-@prison_block()
+@prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(kick_members=True)
 @app_commands.checks.has_permissions(kick_members=True)
 async def kick(
@@ -1805,7 +1808,7 @@ async def kick(
 
 
 @bot.tree.command(name="ban", description="Ban a member from the server.")
-@prison_block()
+@prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(ban_members=True)
 @app_commands.checks.has_permissions(ban_members=True)
 async def ban(
@@ -1842,7 +1845,7 @@ async def ban(
 
 
 @bot.tree.command(name="tempban", description="Ban a member temporarily.")
-@prison_block()
+@prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(ban_members=True)
 @app_commands.checks.has_permissions(ban_members=True)
 async def tempban(
@@ -1897,7 +1900,7 @@ async def tempban(
 
 
 @bot.tree.command(name="unban", description="Unban a user with their ID.")
-@prison_block()
+@prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(ban_members=True)
 @app_commands.checks.has_permissions(ban_members=True)
 async def unban(
@@ -1939,7 +1942,7 @@ async def unban(
 
 
 @bot.tree.command(name="clear", description="Delete a number of recent messages.")
-@prison_block()
+@prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(manage_messages=True)
 @app_commands.checks.has_permissions(manage_messages=True)
 async def clear(
@@ -1962,7 +1965,7 @@ async def clear(
 
 
 @bot.tree.command(name="resetall", description="Reset all bot cooldowns.")
-@prison_block()
+@prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
 async def resetall(interaction: discord.Interaction) -> None:
@@ -1974,7 +1977,7 @@ async def resetall(interaction: discord.Interaction) -> None:
 
 
 @bot.tree.command(name="resetallbal", description="Reset everyone's balance to 1000.")
-@prison_block()
+@prison_block(allow_staff_bypass=True)
 async def resetallbal(interaction: discord.Interaction) -> None:
     if interaction.user.id != BALANCE_RESET_OWNER_ID:
         await interaction.response.send_message(
