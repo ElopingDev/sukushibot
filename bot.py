@@ -28,6 +28,7 @@ PRISON_FILE = Path("prison.json")
 ATTACK_FILE = Path("attack_cooldowns.json")
 CHANGEJOB_FILE = Path("changejob.json")
 STARTING_BALANCE = 1000
+BALANCE_RESET_OWNER_ID = 885927546456272957
 DAILY_REWARD = 500
 WORK_REWARD = 1000
 WORK_FAIL_REWARD = 500
@@ -170,6 +171,24 @@ def ensure_minimum_balance(user_id: int, minimum: int = STARTING_BALANCE) -> int
     if current >= minimum:
         return current
     return set_balance_value(user_id, minimum)
+
+
+def get_top_balances(limit: int = 10) -> list[tuple[int, int]]:
+    data = load_economy()
+    sorted_balances = sorted(
+        ((int(user_id), balance) for user_id, balance in data.items()),
+        key=lambda item: item[1],
+        reverse=True,
+    )
+    return sorted_balances[:limit]
+
+
+def reset_all_balances(amount: int = STARTING_BALANCE) -> int:
+    data = load_economy()
+    for user_id in list(data.keys()):
+        data[user_id] = amount
+    save_economy(data)
+    return len(data)
 
 
 def load_tempbans() -> dict[str, dict[str, str]]:
@@ -1294,6 +1313,32 @@ async def balance(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(embed=embed)
 
 
+@bot.tree.command(name="leaderboard", description="Show the richest users on the server.")
+@prison_block()
+async def leaderboard(interaction: discord.Interaction) -> None:
+    top_balances = get_top_balances(10)
+    if not top_balances:
+        await interaction.response.send_message(
+            "Aucune donnée économique disponible pour le moment.",
+            ephemeral=True,
+        )
+        return
+
+    lines: list[str] = []
+    for index, (user_id, amount) in enumerate(top_balances, start=1):
+        member = interaction.guild.get_member(user_id) if interaction.guild else None
+        user_label = member.mention if member else f"<@{user_id}>"
+        lines.append(f"**{index}.** {user_label} — **{amount} Sukushi Dollars**")
+
+    embed = make_embed(
+        "Leaderboard",
+        "\n".join(lines),
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Richesse",
+    )
+    await interaction.response.send_message(embed=embed)
+
+
 @bot.tree.command(name="daily", description="Claim your daily Sukushi Dollars.")
 @prison_block()
 async def daily(interaction: discord.Interaction) -> None:
@@ -1787,6 +1832,26 @@ async def resetall(interaction: discord.Interaction) -> None:
     reset_cooldown_files()
     await interaction.response.send_message(
         "Tous les cooldowns ont été réinitialisés.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="resetallbal", description="Reset everyone's balance to 1000.")
+@prison_block()
+async def resetallbal(interaction: discord.Interaction) -> None:
+    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+        await interaction.response.send_message(
+            "Tu n'es pas autorisé à utiliser cette commande.",
+            ephemeral=True,
+        )
+        return
+
+    updated_users = reset_all_balances(STARTING_BALANCE)
+    await interaction.response.send_message(
+        (
+            f"Tous les soldes ont été réinitialisés à **{STARTING_BALANCE} Sukushi Dollars**.\n"
+            f"Comptes mis à jour : **{updated_users}**."
+        ),
         ephemeral=True,
     )
 
