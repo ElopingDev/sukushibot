@@ -12,6 +12,8 @@ from discord import app_commands
 WELCOME_CHANNEL_ID = 1494255574949429438
 GOODBYE_CHANNEL_ID = 1494255913366978641
 AUTOROLE_CHANNEL_ID = 1494255821054414878
+LOTTERY_CHANNEL_ID = 1494473046499786802
+LOTTERY_PING_ROLE_ID = 1494474779355386027
 TICKET_PANEL_CHANNEL_ID = 1494461780322287667
 JOIN_ROLE_ID = 1494249084221919343
 TICKET_STAFF_ROLE_ID = 1494265033784430632
@@ -30,6 +32,7 @@ JOB_FILE = Path("jobs.json")
 PRISON_FILE = Path("prison.json")
 ATTACK_FILE = Path("attack_cooldowns.json")
 CHANGEJOB_FILE = Path("changejob.json")
+LOTTERY_FILE = Path("lottery.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
 DAILY_REWARD = 500
@@ -41,7 +44,10 @@ ATTACK_COOLDOWN = timedelta(hours=5)
 GLOBAL_ATTACK_COOLDOWN = timedelta(minutes=30)
 CHANGEJOB_COOLDOWN = timedelta(days=1)
 PRISON_DURATION = timedelta(minutes=10)
+LOTTERY_DURATION = timedelta(hours=24)
 PRISON_CHANCE = 0.15
+LOTTERY_ENTRY_COST = 2000
+LOTTERY_PRIZE = 10000
 JOB_OPTIONS = {
     "mugger": "Braqueur",
     "dealer": "Dealer",
@@ -300,6 +306,21 @@ def save_json_dict(path: Path, data: dict[str, str]) -> None:
         json.dump(data, file, indent=2, ensure_ascii=False)
 
 
+def load_lottery_state() -> dict[str, object]:
+    if not LOTTERY_FILE.exists():
+        return {}
+
+    with LOTTERY_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    return data if isinstance(data, dict) else {}
+
+
+def save_lottery_state(data: dict[str, object]) -> None:
+    with LOTTERY_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
+
+
 def reset_cooldown_files() -> None:
     for path in (DAILY_FILE, WORK_FILE, CHANGEJOB_FILE, ATTACK_FILE):
         save_json_dict(path, {})
@@ -514,6 +535,55 @@ def get_autorole_exclusive_group(role_id: int) -> set[int] | None:
         if role_id in group:
             return group
     return None
+
+
+def get_lottery_participants(state: dict[str, object]) -> list[int]:
+    participants = state.get("participants", [])
+    if not isinstance(participants, list):
+        return []
+    result: list[int] = []
+    for user_id in participants:
+        try:
+            result.append(int(user_id))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def get_lottery_end_time(state: dict[str, object]) -> datetime | None:
+    raw_value = state.get("ends_at")
+    if not isinstance(raw_value, str):
+        return None
+    try:
+        return datetime.fromisoformat(raw_value)
+    except ValueError:
+        return None
+
+
+def build_lottery_embed(*, ends_at: datetime, participants_count: int) -> discord.Embed:
+    unix_timestamp = int(ends_at.timestamp())
+    embed = make_embed(
+        "Loterie Sukushi",
+        (
+            f"Participe a la loterie du serveur pour **{LOTTERY_ENTRY_COST} Sukushi Dollars**.\n"
+            f"Le gagnant remportera **{LOTTERY_PRIZE} Sukushi Dollars**.\n\n"
+            f"Fin du tirage : <t:{unix_timestamp}:F>\n"
+            f"Temps restant : <t:{unix_timestamp}:R>"
+        ),
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Loterie",
+    )
+    embed.add_field(name="Participants", value=f"**{participants_count}**", inline=True)
+    embed.add_field(name="Cout", value=f"**{LOTTERY_ENTRY_COST} SD**", inline=True)
+    embed.add_field(name="Gain", value=f"**{LOTTERY_PRIZE} SD**", inline=True)
+    return embed
+
+
+def build_lottery_start_message() -> str:
+    return (
+        f"<@&{LOTTERY_PING_ROLE_ID}> une nouvelle loterie vient de commencer !\n"
+        f"Clique sur le bouton pour participer pour **{LOTTERY_ENTRY_COST} Sukushi Dollars**."
+    )
 
 
 def parse_duration(value: str) -> timedelta:
@@ -1285,6 +1355,91 @@ class TicketCloseView(discord.ui.View):
         await interaction.channel.delete(reason=f"Ticket fermé par {interaction.user}")
 
 
+class LotteryView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Participer",
+        style=discord.ButtonStyle.success,
+        custom_id="lottery:join",
+    )
+    async def join_lottery(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        if not await ensure_not_in_prison(interaction):
+            return
+        if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+            await interaction.response.send_message(
+                "Cette interaction doit etre utilisee dans le serveur.",
+                ephemeral=True,
+            )
+            return
+
+        state = load_lottery_state()
+        message_id = state.get("message_id")
+        if not isinstance(message_id, int) or interaction.message is None or interaction.message.id != message_id:
+            await interaction.response.send_message(
+                "Cette loterie n'est plus active.",
+                ephemeral=True,
+            )
+            return
+
+        ends_at = get_lottery_end_time(state)
+        if ends_at is None:
+            await interaction.response.send_message(
+                "La loterie n'est pas configuree correctement.",
+                ephemeral=True,
+            )
+            return
+
+        if ends_at <= datetime.now(timezone.utc):
+            await interaction.response.send_message(
+                "Le tirage est en cours. Reessaie dans un instant.",
+                ephemeral=True,
+            )
+            return
+
+        ensure_minimum_balance(interaction.user.id)
+        participants = get_lottery_participants(state)
+        if interaction.user.id in participants:
+            await interaction.response.send_message(
+                "Tu participes deja a cette loterie.",
+                ephemeral=True,
+            )
+            return
+
+        balance_value = get_balance_value(interaction.user.id)
+        if balance_value < LOTTERY_ENTRY_COST:
+            await interaction.response.send_message(
+                f"Tu n'as pas assez d'argent. Il faut **{LOTTERY_ENTRY_COST} Sukushi Dollars** pour participer.",
+                ephemeral=True,
+            )
+            return
+
+        set_balance_value(interaction.user.id, balance_value - LOTTERY_ENTRY_COST)
+        participants.append(interaction.user.id)
+        state["participants"] = participants
+        save_lottery_state(state)
+
+        await interaction.response.edit_message(
+            embed=build_lottery_embed(
+                ends_at=ends_at,
+                participants_count=len(participants),
+            ),
+            view=self,
+        )
+        await interaction.followup.send(
+            (
+                f"Ta participation est validee pour **{LOTTERY_ENTRY_COST} Sukushi Dollars**.\n"
+                f"Bonne chance {interaction.user.mention}."
+            ),
+            ephemeral=True,
+        )
+
+
 class SukushiBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -1292,12 +1447,14 @@ class SukushiBot(discord.Client):
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
         self.tempban_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
+        self.lottery_task: asyncio.Task[None] | None = None
         self.restored_tempbans = False
 
     async def setup_hook(self) -> None:
         guild = discord.Object(id=PRIMARY_GUILD_ID)
         self.add_view(TicketOpenView())
         self.add_view(TicketCloseView())
+        self.add_view(LotteryView())
         self.tree.copy_global_to(guild=guild)
         synced = await self.tree.sync(guild=guild)
         print(f"Synced {len(synced)} command(s) to primary guild {PRIMARY_GUILD_ID}.")
@@ -1310,6 +1467,7 @@ class SukushiBot(discord.Client):
             await self.restore_tempbans()
             self.restored_tempbans = True
         await self.seed_existing_member_balances()
+        await self.restore_lottery()
         print("Slash commands are synced and ready.")
 
     async def seed_existing_member_balances(self) -> None:
@@ -1360,6 +1518,94 @@ class SukushiBot(discord.Client):
             )
 
         print(f"Restored {len(self.tempban_tasks)} persistent tempban task(s).")
+
+    async def restore_lottery(self) -> None:
+        state = load_lottery_state()
+        message_id = state.get("message_id")
+        ends_at = get_lottery_end_time(state)
+        if not isinstance(message_id, int) or ends_at is None:
+            return
+
+        await self.schedule_lottery_draw(ends_at)
+
+    async def schedule_lottery_draw(self, ends_at: datetime) -> None:
+        if self.lottery_task is not None:
+            self.lottery_task.cancel()
+
+        async def runner(expected_end_at: datetime) -> None:
+            try:
+                delay = max(0.0, (expected_end_at - datetime.now(timezone.utc)).total_seconds())
+                await asyncio.sleep(delay)
+                await self.finish_lottery_round(expected_end_at)
+            except asyncio.CancelledError:
+                return
+            finally:
+                if asyncio.current_task() is self.lottery_task:
+                    self.lottery_task = None
+
+        self.lottery_task = asyncio.create_task(runner(ends_at))
+
+    async def get_lottery_channel(self) -> discord.TextChannel | None:
+        channel = self.get_channel(LOTTERY_CHANNEL_ID)
+        return channel if isinstance(channel, discord.TextChannel) else None
+
+    async def update_lottery_panel_message(self, state: dict[str, object]) -> None:
+        channel = await self.get_lottery_channel()
+        message_id = state.get("message_id")
+        ends_at = get_lottery_end_time(state)
+        if channel is None or not isinstance(message_id, int) or ends_at is None:
+            return
+
+        try:
+            message = await channel.fetch_message(message_id)
+        except discord.NotFound:
+            return
+
+        await message.edit(
+            embed=build_lottery_embed(
+                ends_at=ends_at,
+                participants_count=len(get_lottery_participants(state)),
+            ),
+            view=LotteryView(),
+        )
+
+    async def finish_lottery_round(self, expected_end_at: datetime) -> None:
+        state = load_lottery_state()
+        ends_at = get_lottery_end_time(state)
+        message_id = state.get("message_id")
+        if ends_at is None or ends_at != expected_end_at or not isinstance(message_id, int):
+            return
+
+        channel = await self.get_lottery_channel()
+        if channel is None:
+            return
+
+        participants = get_lottery_participants(state)
+        if participants:
+            winner_id = random.choice(participants)
+            new_balance = add_balance(winner_id, LOTTERY_PRIZE)
+            await channel.send(
+                (
+                    f"La loterie est terminee. Bravo <@{winner_id}> !\n"
+                    f"Tu remportes **{LOTTERY_PRIZE} Sukushi Dollars**.\n"
+                    f"Nouveau solde : **{new_balance} Sukushi Dollars**."
+                )
+            )
+        else:
+            await channel.send(
+                "La loterie est terminee, mais personne n'a participe cette fois-ci."
+            )
+
+        next_end_at = datetime.now(timezone.utc) + LOTTERY_DURATION
+        next_state: dict[str, object] = {
+            "message_id": message_id,
+            "participants": [],
+            "ends_at": next_end_at.isoformat(),
+        }
+        save_lottery_state(next_state)
+        await self.update_lottery_panel_message(next_state)
+        await channel.send(build_lottery_start_message())
+        await self.schedule_lottery_draw(next_end_at)
 
     async def execute_persistent_unban(
         self,
@@ -2218,11 +2464,11 @@ async def clear(
     )
 
 
-@bot.tree.command(name="autorolepanel", description="Envoie le panneau des autoroles.")
+@bot.tree.command(name="lotterypanel", description="Envoie le panneau de la loterie.")
 @prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(manage_messages=True)
 @app_commands.checks.has_permissions(manage_messages=True)
-async def autorolepanel(interaction: discord.Interaction) -> None:
+async def lotterypanel(interaction: discord.Interaction) -> None:
     if interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
@@ -2230,13 +2476,35 @@ async def autorolepanel(interaction: discord.Interaction) -> None:
         )
         return
 
-    panel_channel = interaction.guild.get_channel(AUTOROLE_CHANNEL_ID)
+    panel_channel = interaction.guild.get_channel(LOTTERY_CHANNEL_ID)
     if not isinstance(panel_channel, discord.TextChannel):
         await interaction.response.send_message(
-            "Le salon des autoroles est introuvable.",
+            "Le salon de la loterie est introuvable.",
             ephemeral=True,
         )
         return
+
+    if bot.lottery_task is not None:
+        bot.lottery_task.cancel()
+
+    ends_at = datetime.now(timezone.utc) + LOTTERY_DURATION
+    await panel_channel.send(build_lottery_start_message())
+    message = await panel_channel.send(
+        embed=build_lottery_embed(ends_at=ends_at, participants_count=0),
+        view=LotteryView(),
+    )
+    state: dict[str, object] = {
+        "message_id": message.id,
+        "participants": [],
+        "ends_at": ends_at.isoformat(),
+    }
+    save_lottery_state(state)
+    await bot.schedule_lottery_draw(ends_at)
+    await interaction.response.send_message(
+        f"Le panneau de la loterie a ete envoye dans {panel_channel.mention}.",
+        ephemeral=True,
+    )
+    return
 
     for panel in AUTOROLE_PANELS:
         lines = [
