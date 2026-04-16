@@ -354,7 +354,26 @@ def update_pair_cooldown(path: Path, user_id: int, target_id: int) -> None:
     save_json_dict(path, data)
 
 
+def can_bypass_prison(member: discord.abc.User | discord.Member) -> bool:
+    if not isinstance(member, discord.Member):
+        return False
+
+    permissions = member.guild_permissions
+    return any(
+        (
+            permissions.administrator,
+            permissions.moderate_members,
+            permissions.kick_members,
+            permissions.ban_members,
+            permissions.manage_messages,
+        )
+    )
+
+
 async def ensure_not_in_prison(interaction: discord.Interaction) -> bool:
+    if can_bypass_prison(interaction.user):
+        return True
+
     release_at = get_prison_release(interaction.user.id)
     if release_at is None:
         return True
