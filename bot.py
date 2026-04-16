@@ -35,6 +35,7 @@ WORK_FAIL_REWARD = 500
 DAILY_COOLDOWN = timedelta(days=1)
 WORK_COOLDOWN = timedelta(days=1)
 ATTACK_COOLDOWN = timedelta(hours=5)
+GLOBAL_ATTACK_COOLDOWN = timedelta(minutes=30)
 CHANGEJOB_COOLDOWN = timedelta(days=1)
 PRISON_DURATION = timedelta(minutes=10)
 PRISON_CHANCE = 0.15
@@ -1495,6 +1496,18 @@ async def attack(
     ensure_minimum_balance(attacker.id)
     ensure_minimum_balance(cible.id)
 
+    global_cooldown_remaining = get_cooldown_remaining(
+        ATTACK_FILE,
+        attacker.id,
+        GLOBAL_ATTACK_COOLDOWN,
+    )
+    if global_cooldown_remaining is not None:
+        await interaction.response.send_message(
+            f"Tu dois attendre **{format_remaining_time(global_cooldown_remaining)}** avant de relancer une attaque.",
+            ephemeral=True,
+        )
+        return
+
     cooldown_remaining = get_pair_cooldown_remaining(
         ATTACK_FILE,
         attacker.id,
@@ -1515,6 +1528,7 @@ async def attack(
         )
         return
 
+    update_cooldown(ATTACK_FILE, attacker.id)
     ACTIVE_ATTACK_USERS.add(attacker.id)
     ACTIVE_ATTACK_USERS.add(cible.id)
     view = AttackView(attacker, cible)
