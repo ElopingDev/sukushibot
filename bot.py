@@ -168,10 +168,14 @@ def add_balance(user_id: int, amount: int) -> int:
 
 
 def ensure_minimum_balance(user_id: int, minimum: int = STARTING_BALANCE) -> int:
-    current = get_balance_value(user_id)
-    if current >= minimum:
-        return current
-    return set_balance_value(user_id, minimum)
+    data = load_economy()
+    key = str(user_id)
+    if key in data:
+        return data[key]
+
+    data[key] = minimum
+    save_economy(data)
+    return data[key]
 
 
 def get_top_balances(limit: int = 10) -> list[tuple[int, int]]:
@@ -1060,7 +1064,7 @@ class SukushiBot(discord.Client):
         changed = False
         for member in guild.members:
             key = str(member.id)
-            if economy_data.get(key, 0) < STARTING_BALANCE:
+            if key not in economy_data:
                 economy_data[key] = STARTING_BALANCE
                 changed = True
 
