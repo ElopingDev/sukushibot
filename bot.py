@@ -226,6 +226,11 @@ def save_json_dict(path: Path, data: dict[str, str]) -> None:
         json.dump(data, file, indent=2, ensure_ascii=False)
 
 
+def reset_cooldown_files() -> None:
+    for path in (DAILY_FILE, WORK_FILE, CHANGEJOB_FILE, ATTACK_FILE):
+        save_json_dict(path, {})
+
+
 def get_cooldown_remaining(path: Path, user_id: int, cooldown: timedelta) -> timedelta | None:
     data = load_json_dict(path)
     raw_value = data.get(str(user_id))
@@ -1770,6 +1775,18 @@ async def clear(
     deleted = await interaction.channel.purge(limit=amount)
     await interaction.followup.send(
         f"{len(deleted)} message(s) supprimé(s).",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="resetall", description="Reset all bot cooldowns.")
+@prison_block()
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+async def resetall(interaction: discord.Interaction) -> None:
+    reset_cooldown_files()
+    await interaction.response.send_message(
+        "Tous les cooldowns ont été réinitialisés.",
         ephemeral=True,
     )
 
