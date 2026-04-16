@@ -12,7 +12,9 @@ from discord import app_commands
 WELCOME_CHANNEL_ID = 1494255574949429438
 GOODBYE_CHANNEL_ID = 1494255913366978641
 AUTOROLE_CHANNEL_ID = 1494255821054414878
+TICKET_PANEL_CHANNEL_ID = 1494461780322287667
 JOIN_ROLE_ID = 1494249084221919343
+TICKET_STAFF_ROLE_ID = 1494265033784430632
 PRIMARY_GUILD_ID = 1494245152858964070
 
 BANNER_URL = "https://i.imgur.com/x4uAHlu.png"
@@ -86,6 +88,7 @@ ATTACK_PLAYER_DAMAGE = (18, 32)
 ATTACK_AI_DAMAGE = (10, 20)
 ATTACK_STEAL_PERCENT = (0.04, 0.1)
 ACTIVE_ATTACK_USERS: set[int] = set()
+TICKET_OWNER_TOPIC_PREFIX = "ticket_owner:"
 
 AUTOROLE_MAP = {
     "emoji_1": 1494250525846278174,
@@ -425,6 +428,38 @@ def get_role_by_id(guild: discord.Guild | None, role_id: int) -> discord.Role | 
     if guild is None:
         return None
     return guild.get_role(role_id)
+
+
+def member_has_role(member: discord.abc.User | discord.Member, role_id: int) -> bool:
+    return isinstance(member, discord.Member) and any(role.id == role_id for role in member.roles)
+
+
+def sanitize_ticket_name(display_name: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9-]+", "-", display_name.lower())
+    cleaned = re.sub(r"-+", "-", cleaned).strip("-")
+    return cleaned or "membre"
+
+
+def make_ticket_topic(user_id: int) -> str:
+    return f"{TICKET_OWNER_TOPIC_PREFIX}{user_id}"
+
+
+def get_ticket_owner_id(channel: discord.abc.GuildChannel | None) -> int | None:
+    if not isinstance(channel, discord.TextChannel) or channel.topic is None:
+        return None
+    if not channel.topic.startswith(TICKET_OWNER_TOPIC_PREFIX):
+        return None
+
+    raw_value = channel.topic.removeprefix(TICKET_OWNER_TOPIC_PREFIX)
+    return int(raw_value) if raw_value.isdigit() else None
+
+
+def find_open_ticket_channel(guild: discord.Guild, user_id: int) -> discord.TextChannel | None:
+    expected_topic = make_ticket_topic(user_id)
+    for channel in guild.text_channels:
+        if channel.topic == expected_topic:
+            return channel
+    return None
 
 
 def parse_duration(value: str) -> timedelta:
@@ -1049,6 +1084,153 @@ class WorkMinigameView(discord.ui.View):
         return callback
 
 
+class TicketOpenView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Ouvrir un ticket",
+        style=discord.ButtonStyle.success,
+        custom_id="ticket:open",
+    )
+    async def open_ticket(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+            await interaction.response.send_message(
+                "Cette interaction doit être utilisée dans le serveur.",
+                ephemeral=True,
+            )
+            return
+
+        staff_role = get_role_by_id(interaction.guild, TICKET_STAFF_ROLE_ID)
+        panel_channel = interaction.guild.get_channel(TICKET_PANEL_CHANNEL_ID)
+        if staff_role is None or not isinstance(panel_channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Le système de tickets n'est pas configuré correctement.",
+                ephemeral=True,
+            )
+            return
+
+        existing_channel = find_open_ticket_channel(interaction.guild, interaction.user.id)
+        if existing_channel is not None:
+            await interaction.response.send_message(
+                f"Tu as déjà un ticket ouvert : {existing_channel.mention}.",
+                ephemeral=True,
+            )
+            return
+
+        bot_member = get_bot_member(interaction.guild, bot.user)
+        if bot_member is None:
+            await interaction.response.send_message(
+                "Je n'arrive pas à vérifier mes permissions dans ce serveur.",
+                ephemeral=True,
+            )
+            return
+
+        overwrites = {
+            interaction.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            interaction.user: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                attach_files=True,
+                embed_links=True,
+            ),
+            staff_role: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_messages=True,
+            ),
+            bot_member: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_messages=True,
+            ),
+        }
+
+        channel_name = f"ticket-{sanitize_ticket_name(interaction.user.display_name)}"
+        ticket_channel = await interaction.guild.create_text_channel(
+            name=channel_name,
+            category=panel_channel.category,
+            topic=make_ticket_topic(interaction.user.id),
+            overwrites=overwrites,
+            reason=f"Ticket ouvert par {interaction.user}",
+        )
+
+        embed = make_embed(
+            "Ticket ouvert",
+            (
+                f"Bonjour {interaction.user.mention}, un membre du staff va te répondre ici.\n"
+                "Explique clairement ton problème ou ta demande pour qu'on puisse t'aider rapidement."
+            ),
+            color=SUKUSHI_PINK,
+            footer="Sukushi bot | Tickets",
+        )
+        await ticket_channel.send(
+            content=f"{interaction.user.mention} <@&{TICKET_STAFF_ROLE_ID}>",
+            embed=embed,
+            view=TicketCloseView(),
+        )
+        await interaction.response.send_message(
+            f"Ton ticket a été créé : {ticket_channel.mention}.",
+            ephemeral=True,
+        )
+
+
+class TicketCloseView(discord.ui.View):
+    def __init__(self) -> None:
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Fermer le ticket",
+        style=discord.ButtonStyle.danger,
+        custom_id="ticket:close",
+    )
+    async def close_ticket(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "Cette interaction doit être utilisée dans le serveur.",
+                ephemeral=True,
+            )
+            return
+
+        if not member_has_role(interaction.user, TICKET_STAFF_ROLE_ID):
+            await interaction.response.send_message(
+                "Seuls les membres du staff peuvent fermer un ticket.",
+                ephemeral=True,
+            )
+            return
+
+        if not isinstance(interaction.channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "Ce bouton doit être utilisé dans un ticket.",
+                ephemeral=True,
+            )
+            return
+
+        owner_id = get_ticket_owner_id(interaction.channel)
+        if owner_id is None:
+            await interaction.response.send_message(
+                "Ce salon n'est pas reconnu comme un ticket.",
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message("Fermeture du ticket...", ephemeral=True)
+        await interaction.channel.delete(reason=f"Ticket fermé par {interaction.user}")
+
+
 class SukushiBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
@@ -1060,6 +1242,8 @@ class SukushiBot(discord.Client):
 
     async def setup_hook(self) -> None:
         guild = discord.Object(id=PRIMARY_GUILD_ID)
+        self.add_view(TicketOpenView())
+        self.add_view(TicketCloseView())
         self.tree.copy_global_to(guild=guild)
         synced = await self.tree.sync(guild=guild)
         print(f"Synced {len(synced)} command(s) to primary guild {PRIMARY_GUILD_ID}.")
@@ -1960,6 +2144,43 @@ async def clear(
     deleted = await interaction.channel.purge(limit=amount)
     await interaction.followup.send(
         f"{len(deleted)} message(s) supprimé(s).",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="ticketpanel", description="Envoie le panneau d'ouverture de ticket.")
+@prison_block(allow_staff_bypass=True)
+@app_commands.default_permissions(manage_messages=True)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def ticketpanel(interaction: discord.Interaction) -> None:
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    panel_channel = interaction.guild.get_channel(TICKET_PANEL_CHANNEL_ID)
+    if not isinstance(panel_channel, discord.TextChannel):
+        await interaction.response.send_message(
+            "Le salon du panneau ticket est introuvable.",
+            ephemeral=True,
+        )
+        return
+
+    embed = make_embed(
+        "Ouvrir un ticket",
+        (
+            "Besoin d'aide ou de parler au staff en privé ?\n"
+            "Clique sur le bouton ci-dessous pour ouvrir un ticket. "
+            "Un salon privé sera créé, accessible uniquement par toi et le staff."
+        ),
+        color=SUKUSHI_PINK,
+        footer="Sukushi bot | Tickets",
+    )
+    await panel_channel.send(embed=embed, view=TicketOpenView())
+    await interaction.response.send_message(
+        f"Le panneau ticket a été envoyé dans {panel_channel.mention}.",
         ephemeral=True,
     )
 
