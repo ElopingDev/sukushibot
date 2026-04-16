@@ -20,6 +20,7 @@ PRIMARY_GUILD_ID = 1494245152858964070
 BANNER_URL = "https://i.imgur.com/x4uAHlu.png"
 SUKUSHI_PINK = discord.Color.from_rgb(255, 105, 180)
 AUTOROLE_TITLE = "Autoroles"
+AUTOROLE_FOOTER = "Sukushi bot | Autoroles"
 ECONOMY_FILE = Path("economy.json")
 ECONOMY_META_FILE = Path("economy_meta.json")
 TEMPBAN_FILE = Path("tempbans.json")
@@ -90,16 +91,62 @@ ATTACK_STEAL_PERCENT = (0.04, 0.1)
 ACTIVE_ATTACK_USERS: set[int] = set()
 TICKET_OWNER_TOPIC_PREFIX = "ticket_owner:"
 
+AUTOROLE_PANELS = [
+    {
+        "title": "Autoroles | Genre",
+        "description": (
+            "Réagis pour choisir le rôle qui correspond le mieux à ton genre.\n"
+            "Un seul rôle de cette catégorie peut être actif à la fois."
+        ),
+        "include_banner": True,
+        "entries": [
+            {"emoji": "♂️", "label": "Homme", "role_id": 1494250520112791582},
+            {"emoji": "♀️", "label": "Femme", "role_id": 1494250520662245446},
+            {"emoji": "⚧️", "label": "Non Binaire", "role_id": 1494250522495029369},
+            {"emoji": "❔", "label": "Autre", "role_id": 1494250524940173352},
+        ],
+    },
+    {
+        "title": "Autoroles | Âge",
+        "description": (
+            "Réagis pour sélectionner ta tranche d'âge.\n"
+            "Un seul rôle de cette catégorie peut être actif à la fois."
+        ),
+        "include_banner": False,
+        "entries": [
+            {"emoji": "1️⃣", "label": "13-15 ans", "role_id": 1494249086126264401},
+            {"emoji": "2️⃣", "label": "16-17 ans", "role_id": 1494249086931439698},
+            {"emoji": "3️⃣", "label": "18 ans +", "role_id": 1494250520112533544},
+        ],
+    },
+    {
+        "title": "Autoroles | Pings",
+        "description": (
+            "Réagis pour recevoir les notifications qui t'intéressent.\n"
+            "Tu peux cumuler plusieurs rôles dans cette catégorie."
+        ),
+        "include_banner": False,
+        "entries": [
+            {"emoji": "📢", "label": "Annonces", "role_id": 1494250525846278174},
+            {"emoji": "🎁", "label": "Giveaway", "role_id": 1494250837814284389},
+            {"emoji": "🎉", "label": "Events", "role_id": 1494250775734386781},
+        ],
+    },
+]
 AUTOROLE_MAP = {
-    "emoji_1": 1494250525846278174,
-    "emoji_8": 1494250837814284389,
-    "emoji_6": 1494250775734386781,
+    entry["emoji"]: entry["role_id"]
+    for panel in AUTOROLE_PANELS
+    for entry in panel["entries"]
 }
 AUTOROLE_LABELS = {
-    "emoji_1": "Annonces",
-    "emoji_8": "Giveaway",
-    "emoji_6": "Events",
+    entry["emoji"]: entry["label"]
+    for panel in AUTOROLE_PANELS
+    for entry in panel["entries"]
 }
+AUTOROLE_EXCLUSIVE_ROLE_GROUPS = [
+    {1494250520112791582, 1494250520662245446, 1494250522495029369, 1494250524940173352},
+    {1494249086126264401, 1494249086931439698, 1494250520112533544},
+]
 
 DURATION_PATTERN = re.compile(r"^\s*(\d+)\s*([smhd])\s*$", re.IGNORECASE)
 
@@ -459,6 +506,13 @@ def find_open_ticket_channel(guild: discord.Guild, user_id: int) -> discord.Text
     for channel in guild.text_channels:
         if channel.topic == expected_topic:
             return channel
+    return None
+
+
+def get_autorole_exclusive_group(role_id: int) -> set[int] | None:
+    for group in AUTOROLE_EXCLUSIVE_ROLE_GROUPS:
+        if role_id in group:
+            return group
     return None
 
 
@@ -1430,7 +1484,11 @@ class SukushiBot(discord.Client):
 
         if self.user is None or message.author.id != self.user.id:
             return
-        if not message.embeds or message.embeds[0].title != AUTOROLE_TITLE:
+        if not message.embeds:
+            return
+
+        footer_text = message.embeds[0].footer.text if message.embeds[0].footer else None
+        if footer_text != AUTOROLE_FOOTER:
             return
 
         role = get_role_by_id(guild, AUTOROLE_MAP[emoji_name])
@@ -1445,6 +1503,18 @@ class SukushiBot(discord.Client):
                 return
 
         if add_role:
+            exclusive_group = get_autorole_exclusive_group(role.id)
+            if exclusive_group is not None:
+                roles_to_remove = [
+                    existing_role
+                    for existing_role in member.roles
+                    if existing_role.id in exclusive_group and existing_role.id != role.id
+                ]
+                if roles_to_remove:
+                    await member.remove_roles(
+                        *roles_to_remove,
+                        reason="Autorole category swap",
+                    )
             await member.add_roles(role, reason="Autorole reaction")
         else:
             await member.remove_roles(role, reason="Autorole reaction removed")
@@ -2148,11 +2218,11 @@ async def clear(
     )
 
 
-@bot.tree.command(name="ticketpanel", description="Envoie le panneau d'ouverture de ticket.")
+@bot.tree.command(name="autorolepanel", description="Envoie le panneau des autoroles.")
 @prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(manage_messages=True)
 @app_commands.checks.has_permissions(manage_messages=True)
-async def ticketpanel(interaction: discord.Interaction) -> None:
+async def autorolepanel(interaction: discord.Interaction) -> None:
     if interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
@@ -2160,13 +2230,37 @@ async def ticketpanel(interaction: discord.Interaction) -> None:
         )
         return
 
-    panel_channel = interaction.guild.get_channel(TICKET_PANEL_CHANNEL_ID)
+    panel_channel = interaction.guild.get_channel(AUTOROLE_CHANNEL_ID)
     if not isinstance(panel_channel, discord.TextChannel):
         await interaction.response.send_message(
-            "Le salon du panneau ticket est introuvable.",
+            "Le salon des autoroles est introuvable.",
             ephemeral=True,
         )
         return
+
+    for panel in AUTOROLE_PANELS:
+        lines = [
+            f"{entry['emoji']} : **{entry['label']}**"
+            for entry in panel["entries"]
+        ]
+        embed = make_embed(
+            str(panel["title"]),
+            f"{panel['description']}\n\n" + "\n".join(lines),
+            color=SUKUSHI_PINK,
+            footer=AUTOROLE_FOOTER,
+        )
+        if panel["include_banner"]:
+            embed.set_image(url=BANNER_URL)
+
+        message = await panel_channel.send(embed=embed)
+        for entry in panel["entries"]:
+            await message.add_reaction(str(entry["emoji"]))
+
+    await interaction.response.send_message(
+        f"Le panneau des autoroles a été envoyé dans {panel_channel.mention}.",
+        ephemeral=True,
+    )
+    return
 
     embed = make_embed(
         "Ouvrir un ticket",
