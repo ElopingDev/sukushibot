@@ -1314,6 +1314,61 @@ async def balance(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(embed=embed)
 
 
+@bot.tree.command(name="pay", description="Donne une partie de ton argent à un autre joueur.")
+@prison_block()
+async def pay(
+    interaction: discord.Interaction,
+    cible: discord.Member,
+    montant: app_commands.Range[int, 1, 1_000_000],
+) -> None:
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    payer = interaction.user
+    if cible.id == payer.id:
+        await interaction.response.send_message(
+            "Tu ne peux pas te payer toi-même.",
+            ephemeral=True,
+        )
+        return
+
+    if cible.bot:
+        await interaction.response.send_message(
+            "Tu ne peux pas payer un bot.",
+            ephemeral=True,
+        )
+        return
+
+    ensure_minimum_balance(payer.id)
+    ensure_minimum_balance(cible.id)
+
+    payer_balance = get_balance_value(payer.id)
+    if montant > payer_balance:
+        await interaction.response.send_message(
+            f"Tu n'as pas assez d'argent. Solde actuel : **{payer_balance} Sukushi Dollars**.",
+            ephemeral=True,
+        )
+        return
+
+    new_payer_balance = set_balance_value(payer.id, payer_balance - montant)
+    new_target_balance = add_balance(cible.id, montant)
+    embed = make_embed(
+        "Paiement envoyé",
+        (
+            f"{payer.mention} a envoyé **{montant} Sukushi Dollars** à {cible.mention}.\n"
+            f"Ton nouveau solde : **{new_payer_balance} Sukushi Dollars**.\n"
+            f"Nouveau solde de la cible : **{new_target_balance} Sukushi Dollars**."
+        ),
+        color=discord.Color.green(),
+        footer="Sukushi bot | Économie",
+    )
+    await interaction.response.send_message(content=cible.mention, embed=embed)
+
+
 @bot.tree.command(name="leaderboard", description="Show the richest users on the server.")
 @prison_block()
 async def leaderboard(interaction: discord.Interaction) -> None:
