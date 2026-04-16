@@ -38,6 +38,7 @@ ATTACK_COOLDOWN = timedelta(hours=5)
 GLOBAL_ATTACK_COOLDOWN = timedelta(minutes=30)
 CHANGEJOB_COOLDOWN = timedelta(days=1)
 PRISON_DURATION = timedelta(minutes=10)
+TEST_JAIL_DURATION = timedelta(minutes=15)
 PRISON_CHANCE = 0.15
 JOB_OPTIONS = {
     "mugger": "Braqueur",
@@ -1683,6 +1684,46 @@ async def mute(
     await interaction.response.send_message(
         f"{member.mention} a été mute pendant `{format_timedelta(parsed_duration)}`.",
         ephemeral=True,
+    )
+
+
+@bot.tree.command(name="jail", description="Envoie un membre en prison pendant 15 minutes pour test.")
+@prison_block()
+@app_commands.default_permissions(moderate_members=True)
+@app_commands.checks.has_permissions(moderate_members=True)
+async def jail(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    reason: str | None = None,
+) -> None:
+    moderator = get_moderator_member(interaction)
+    if moderator is None or interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit Ãªtre utilisÃ©e dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    bot_member = get_bot_member(interaction.guild, bot.user)
+    if bot_member is None:
+        await interaction.response.send_message(
+            "Je n'arrive pas Ã  vÃ©rifier ma hiÃ©rarchie dans ce serveur.",
+            ephemeral=True,
+        )
+        return
+
+    allowed, message = can_act_on_target(moderator, member, bot_member)
+    if not allowed:
+        await interaction.response.send_message(message, ephemeral=True)
+        return
+
+    release_at = imprison_user(member.id, TEST_JAIL_DURATION)
+    remaining = format_remaining_time(release_at - datetime.now(timezone.utc))
+    await interaction.response.send_message(
+        (
+            f"{member.mention} a Ã©tÃ© envoyÃ© en prison pendant **{remaining}**.\n"
+            f"Raison : {reason or 'Aucune raison fournie'}."
+        )
     )
 
 
