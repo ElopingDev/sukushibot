@@ -102,7 +102,7 @@ AUTOROLE_PANELS = [
         "entries": [
             {"emoji": "♂️", "label": "Homme", "role_id": 1494250520112791582},
             {"emoji": "♀️", "label": "Femme", "role_id": 1494250520662245446},
-            {"emoji": "⚧️", "label": "Non Binaire", "role_id": 1494250522495029369},
+            {"emoji": "🌈", "label": "Non Binaire", "role_id": 1494250522495029369},
             {"emoji": "❔", "label": "Autre", "role_id": 1494250524940173352},
         ],
     },
