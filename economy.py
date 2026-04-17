@@ -336,16 +336,24 @@ def load_faction_state() -> dict[str, dict[str, object]]:
                     if isinstance(raw_member, dict):
                         joined_at = str(raw_member.get("joined_at") or "")
                         base_nick = raw_member.get("base_nick")
+                        raw_role = raw_member.get("role")
                     else:
                         joined_at = ""
                         base_nick = None
+                        raw_role = None
+                    if str(member_id) == str(owner_id):
+                        role = "owner"
+                    else:
+                        role = str(raw_role) if isinstance(raw_role, str) and raw_role in {"member", "co_leader", "owner"} else "member"
                     members[str(member_id)] = {
                         "joined_at": joined_at,
                         "base_nick": str(base_nick) if isinstance(base_nick, str) else None,
+                        "role": role,
                     }
             elif isinstance(raw_members, list):
                 for member_id in raw_members:
-                    members[str(member_id)] = {"joined_at": "", "base_nick": None}
+                    role = "owner" if str(member_id) == str(owner_id) else "member"
+                    members[str(member_id)] = {"joined_at": "", "base_nick": None, "role": role}
 
             factions[str(owner_id)] = {
                 "name": name,

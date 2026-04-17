@@ -418,6 +418,37 @@ def get_faction_member_count(faction: dict[str, object]) -> int:
     return len(members) if isinstance(members, dict) else 0
 
 
+def get_faction_member_role(
+    faction: dict[str, object],
+    user_id: int,
+    *,
+    owner_id: int | None = None,
+) -> str | None:
+    if owner_id is not None and user_id == owner_id:
+        return "owner"
+
+    members = faction.get("members", {})
+    if not isinstance(members, dict):
+        return None
+
+    member_data = members.get(str(user_id))
+    if not isinstance(member_data, dict):
+        return None
+
+    role = member_data.get("role")
+    return str(role) if isinstance(role, str) else "member"
+
+
+def can_manage_faction_invites(
+    faction: dict[str, object],
+    *,
+    owner_id: int,
+    user_id: int,
+) -> bool:
+    role = get_faction_member_role(faction, user_id, owner_id=owner_id)
+    return role in {"owner", "co_leader"}
+
+
 def get_faction_member_ids(faction: dict[str, object]) -> set[int]:
     members = faction.get("members", {})
     if not isinstance(members, dict):
@@ -613,6 +644,13 @@ def build_faction_embed(
     members = faction.get("members", {})
     member_ids = list(members.keys()) if isinstance(members, dict) else []
     member_mentions = [f"<@{member_id}>" for member_id in member_ids[:15]]
+    co_leader_mentions: list[str] = []
+    if isinstance(members, dict):
+        for member_id, metadata in members.items():
+            if str(member_id) == str(owner_id):
+                continue
+            if isinstance(metadata, dict) and metadata.get("role") == "co_leader":
+                co_leader_mentions.append(f"<@{member_id}>")
     owner_member = guild.get_member(owner_id) if guild is not None else None
     embed = make_embed(
         f"Faction | {name}",
@@ -626,6 +664,11 @@ def build_faction_embed(
         inline=True,
     )
     embed.add_field(name="Membres", value=f"**{len(member_ids)}**", inline=True)
+    embed.add_field(
+        name="Co-Leaders",
+        value="\n".join(co_leader_mentions[:8]) if co_leader_mentions else "Aucun",
+        inline=True,
+    )
     embed.add_field(
         name="Liste",
         value="\n".join(member_mentions) if member_mentions else "Aucun membre.",
@@ -4765,6 +4808,7 @@ async def createfaction(
             str(interaction.user.id): {
                 "joined_at": datetime.now(timezone.utc).isoformat(),
                 "base_nick": interaction.user.nick,
+                "role": "owner",
             }
         },
     }
@@ -5036,10 +5080,17 @@ async def invitefaction(
         )
         return
 
-    faction = get_faction_by_owner(interaction.user.id)
-    if faction is None:
+    faction_info = get_faction_for_member(interaction.user.id)
+    if faction_info is None:
         await interaction.response.send_message(
-            "Tu dois être chef d'une faction pour inviter quelqu'un.",
+            "Tu dois être dans une faction pour inviter quelqu'un.",
+        )
+        return
+
+    owner_id, faction = faction_info
+    if not can_manage_faction_invites(faction, owner_id=owner_id, user_id=interaction.user.id):
+        await interaction.response.send_message(
+            "Seul le chef ou un co-leader peut inviter des membres.",
         )
         return
 
@@ -5061,7 +5112,7 @@ async def invitefaction(
         )
         return
 
-    set_faction_invite(membre.id, interaction.user.id)
+    set_faction_invite(membre.id, owner_id)
     await interaction.response.send_message(
         (
             f"{membre.mention}, **{interaction.user.display_name}** t'invite à rejoindre la faction **{faction.get('name') or 'ta faction'}**.\n"
@@ -5117,6 +5168,7 @@ async def joinfaction(interaction: discord.Interaction) -> None:
     members[str(interaction.user.id)] = {
         "joined_at": datetime.now(timezone.utc).isoformat(),
         "base_nick": interaction.user.nick,
+        "role": "member",
     }
     invites.pop(str(interaction.user.id), None)
     save_faction_state(state)
@@ -5269,6 +5321,79 @@ async def kickfaction(
 
     await interaction.response.send_message(
         f"{membre.mention} a été retiré de la faction **{faction_entry.get('name') or 'inconnue'}**.",
+    )
+
+
+@bot.tree.command(name="promotefaction", description="Promeut un membre de ta faction en co-leader.")
+async def promotefaction(
+    interaction: discord.Interaction,
+    membre: discord.Member,
+) -> None:
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+        )
+        return
+
+    faction = get_faction_by_owner(interaction.user.id)
+    if faction is None:
+        await interaction.response.send_message(
+            "Tu dois être chef d'une faction pour promouvoir quelqu'un.",
+        )
+        return
+
+    if membre.id == interaction.user.id:
+        await interaction.response.send_message(
+            "Tu es déjà chef de ta faction.",
+        )
+        return
+
+    target_faction = get_faction_for_member(membre.id)
+    if target_faction is None or target_faction[0] != interaction.user.id:
+        await interaction.response.send_message(
+            f"{membre.mention} n'est pas dans ta faction.",
+        )
+        return
+
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        await interaction.response.send_message(
+            "Impossible de promouvoir ce membre pour le moment.",
+        )
+        return
+
+    faction_entry = factions.get(str(interaction.user.id))
+    if not isinstance(faction_entry, dict):
+        await interaction.response.send_message(
+            "Faction introuvable.",
+        )
+        return
+
+    members = faction_entry.get("members", {})
+    if not isinstance(members, dict):
+        await interaction.response.send_message(
+            "Membres de faction introuvables.",
+        )
+        return
+
+    member_data = members.get(str(membre.id))
+    if not isinstance(member_data, dict):
+        await interaction.response.send_message(
+            "Impossible de trouver ce membre dans la faction.",
+        )
+        return
+
+    if member_data.get("role") == "co_leader":
+        await interaction.response.send_message(
+            f"{membre.mention} est déjà co-leader.",
+        )
+        return
+
+    member_data["role"] = "co_leader"
+    save_faction_state(state)
+    await interaction.response.send_message(
+        f"{membre.mention} est maintenant **Co-Leader** et peut inviter des membres.",
     )
 
 
