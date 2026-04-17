@@ -119,6 +119,9 @@ EVENT_LOOP_POLL_INTERVAL = 30
 EVENT_INTERVAL = timedelta(minutes=30)
 SLOTS_COST = 100
 SLOTS_JACKPOT_CHANCE = 0.10
+MINES_GRID_SIZE = 4
+MINES_TOTAL_TILES = MINES_GRID_SIZE * MINES_GRID_SIZE
+MINES_HOUSE_EDGE = 0.95
 LEVEL_XP_COOLDOWN = timedelta(seconds=60)
 LEVEL_XP_GAIN = (15, 25)
 LEVEL_REWARD = 300
@@ -169,6 +172,7 @@ ATTACK_PLAYER_DAMAGE = (18, 32)
 ATTACK_AI_DAMAGE = (10, 20)
 ATTACK_STEAL_PERCENT = (0.1, 0.15)
 ACTIVE_ATTACK_USERS: set[int] = set()
+ACTIVE_MINES_USERS: set[int] = set()
 TICKET_OWNER_TOPIC_PREFIX = "ticket_owner:"
 PRISONER_TOPIC_PREFIX = "prisoner:"
 
@@ -674,6 +678,50 @@ def build_slots_embed(
     return embed
 
 
+def calculate_mines_multiplier(bombs: int, safe_revealed: int) -> float:
+    if safe_revealed <= 0:
+        return 1.0
+
+    multiplier = MINES_HOUSE_EDGE
+    safe_tiles = MINES_TOTAL_TILES - bombs
+    for index in range(safe_revealed):
+        multiplier *= (MINES_TOTAL_TILES - index) / (safe_tiles - index)
+    return multiplier
+
+
+def build_mines_embed(
+    guild: discord.Guild | None,
+    *,
+    player: discord.abc.User,
+    bet: int,
+    bombs: int,
+    safe_revealed: int,
+    multiplier: float,
+    potential_cashout: int,
+    title: str,
+    description: str,
+    color: discord.Color,
+) -> discord.Embed:
+    coinbag_symbol = get_custom_emoji_text(guild, "coinbag", fallback="🪙")
+    embed = make_embed(
+        title,
+        description,
+        color=color,
+        footer="Sukushi bot | Mines",
+    )
+    embed.add_field(name="Joueur", value=player.mention, inline=True)
+    embed.add_field(name="Mise", value=f"**{bet} Sukushi Dollars**", inline=True)
+    embed.add_field(name="Bombes", value=f"**{bombs}**", inline=True)
+    embed.add_field(
+        name="Cases sûres trouvées",
+        value=f"**{safe_revealed}/{MINES_TOTAL_TILES - bombs}** {coinbag_symbol}",
+        inline=True,
+    )
+    embed.add_field(name="Multiplicateur", value=f"**x{multiplier:.2f}**", inline=True)
+    embed.add_field(name="Cashout actuel", value=f"**{potential_cashout} Sukushi Dollars**", inline=True)
+    return embed
+
+
 def parse_duration(value: str) -> timedelta:
     match = DURATION_PATTERN.match(value)
     if match is None:
@@ -1110,6 +1158,231 @@ class BlackjackView(discord.ui.View):
         button: discord.ui.Button,
     ) -> None:
         await self.finalize_game(interaction)
+
+
+class MinesCellButton(discord.ui.Button):
+    def __init__(self, index: int) -> None:
+        super().__init__(label="?", style=discord.ButtonStyle.secondary, row=index // MINES_GRID_SIZE)
+        self.index = index
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not isinstance(self.view, MinesView):
+            return
+        await self.view.handle_cell_click(interaction, self)
+
+
+class MinesCashoutButton(discord.ui.Button):
+    def __init__(self) -> None:
+        super().__init__(
+            label="Récupérer",
+            style=discord.ButtonStyle.success,
+            row=4,
+            emoji="💰",
+            disabled=True,
+        )
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not isinstance(self.view, MinesView):
+            return
+        await self.view.cashout(interaction)
+
+
+class MinesView(discord.ui.View):
+    def __init__(self, player: discord.abc.User, bet: int, bombs: int, guild: discord.Guild | None) -> None:
+        super().__init__(timeout=120)
+        self.player = player
+        self.bet = bet
+        self.bombs = bombs
+        self.guild = guild
+        self.finished = False
+        self.message: discord.Message | None = None
+        self.safe_revealed = 0
+        self.revealed_cells: set[int] = set()
+        self.bomb_positions = set(random.sample(range(MINES_TOTAL_TILES), bombs))
+        self.coinbag_symbol = get_custom_emoji_text(guild, "coinbag", fallback="🪙")
+        self.cashout_button = MinesCashoutButton()
+
+        for index in range(MINES_TOTAL_TILES):
+            self.add_item(MinesCellButton(index))
+        self.add_item(self.cashout_button)
+
+    def get_multiplier(self) -> float:
+        return calculate_mines_multiplier(self.bombs, self.safe_revealed)
+
+    def get_cashout_amount(self) -> int:
+        if self.safe_revealed <= 0:
+            return self.bet
+        return max(self.bet, int(round(self.bet * self.get_multiplier())))
+
+    def build_active_embed(self) -> discord.Embed:
+        cashout_amount = self.get_cashout_amount()
+        return build_mines_embed(
+            self.guild,
+            player=self.player,
+            bet=self.bet,
+            bombs=self.bombs,
+            safe_revealed=self.safe_revealed,
+            multiplier=self.get_multiplier(),
+            potential_cashout=cashout_amount,
+            title="Casino | Mines",
+            description=(
+                "Clique sur les cases pour trouver les sacs de pièces sans toucher une bombe.\n"
+                "Tu peux récupérer ton gain à tout moment après au moins une case sûre."
+            ),
+            color=SUKUSHI_PINK,
+        )
+
+    def reveal_board(self, *, triggered_bomb: int | None = None) -> None:
+        for child in self.children:
+            if isinstance(child, MinesCellButton):
+                child.disabled = True
+                child.label = ""
+                if child.index in self.bomb_positions:
+                    child.style = discord.ButtonStyle.danger
+                    child.emoji = "💣"
+                elif child.index in self.revealed_cells:
+                    child.style = discord.ButtonStyle.success
+                    child.emoji = self.coinbag_symbol
+                else:
+                    child.style = discord.ButtonStyle.secondary
+                    child.emoji = "▫️"
+                if triggered_bomb is not None and child.index == triggered_bomb:
+                    child.style = discord.ButtonStyle.danger
+                    child.emoji = "💥"
+        self.cashout_button.disabled = True
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not await ensure_not_in_prison(interaction):
+            return False
+        if not await ensure_not_ecobanned(interaction):
+            return False
+        if interaction.user.id != self.player.id:
+            await interaction.response.send_message(
+                "Seul le joueur qui a lancé cette partie peut utiliser ces boutons.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        if self.finished:
+            return
+        self.finished = True
+        self.reveal_board()
+        ACTIVE_MINES_USERS.discard(self.player.id)
+        if self.message is not None:
+            await self.message.edit(
+                embed=build_mines_embed(
+                    self.guild,
+                    player=self.player,
+                    bet=self.bet,
+                    bombs=self.bombs,
+                    safe_revealed=self.safe_revealed,
+                    multiplier=self.get_multiplier(),
+                    potential_cashout=self.get_cashout_amount(),
+                    title="Casino | Mines expiré",
+                    description="La partie a expiré. La mise est perdue.",
+                    color=discord.Color.red(),
+                ),
+                view=self,
+            )
+        self.stop()
+
+    async def finish_loss(self, interaction: discord.Interaction, *, triggered_bomb: int) -> None:
+        self.finished = True
+        self.reveal_board(triggered_bomb=triggered_bomb)
+        ACTIVE_MINES_USERS.discard(self.player.id)
+        await interaction.response.edit_message(
+            embed=build_mines_embed(
+                self.guild,
+                player=self.player,
+                bet=self.bet,
+                bombs=self.bombs,
+                safe_revealed=self.safe_revealed,
+                multiplier=self.get_multiplier(),
+                potential_cashout=0,
+                title="Casino | Boom",
+                description=(
+                    f"{self.player.mention} a touché une bombe.\n"
+                    f"Tu perds **{self.bet} Sukushi Dollars**."
+                ),
+                color=discord.Color.red(),
+            ),
+            view=self,
+        )
+        self.stop()
+
+    async def finish_win(self, interaction: discord.Interaction, *, perfect_clear: bool = False) -> None:
+        self.finished = True
+        self.reveal_board()
+        winnings = self.get_cashout_amount()
+        new_balance = add_balance(self.player.id, winnings)
+        ACTIVE_MINES_USERS.discard(self.player.id)
+        description = (
+            f"{self.player.mention} encaisse **{winnings} Sukushi Dollars**.\n"
+            f"Nouveau solde : **{new_balance} Sukushi Dollars**."
+        )
+        if perfect_clear:
+            description = (
+                f"{self.player.mention} a nettoyé toute la grille.\n"
+                f"Tu remportes **{winnings} Sukushi Dollars**.\n"
+                f"Nouveau solde : **{new_balance} Sukushi Dollars**."
+            )
+        await interaction.response.edit_message(
+            embed=build_mines_embed(
+                self.guild,
+                player=self.player,
+                bet=self.bet,
+                bombs=self.bombs,
+                safe_revealed=self.safe_revealed,
+                multiplier=self.get_multiplier(),
+                potential_cashout=winnings,
+                title="Casino | Cashout",
+                description=description,
+                color=discord.Color.green(),
+            ),
+            view=self,
+        )
+        self.stop()
+
+    async def handle_cell_click(self, interaction: discord.Interaction, button: MinesCellButton) -> None:
+        if self.finished or button.index in self.revealed_cells:
+            return
+
+        if button.index in self.bomb_positions:
+            await self.finish_loss(interaction, triggered_bomb=button.index)
+            return
+
+        self.revealed_cells.add(button.index)
+        self.safe_revealed += 1
+        button.disabled = True
+        button.label = ""
+        button.style = discord.ButtonStyle.success
+        button.emoji = self.coinbag_symbol
+
+        cashout_amount = self.get_cashout_amount()
+        self.cashout_button.disabled = False
+        self.cashout_button.label = f"Récupérer {cashout_amount}"
+
+        if self.safe_revealed >= MINES_TOTAL_TILES - self.bombs:
+            await self.finish_win(interaction, perfect_clear=True)
+            return
+
+        await interaction.response.edit_message(
+            embed=self.build_active_embed(),
+            view=self,
+        )
+
+    async def cashout(self, interaction: discord.Interaction) -> None:
+        if self.finished:
+            return
+        if self.safe_revealed <= 0:
+            await interaction.response.send_message(
+                "Tu dois révéler au moins une case sûre avant de récupérer tes gains.",
+                ephemeral=True,
+            )
+            return
+        await self.finish_win(interaction)
 
 
 class JobSelect(discord.ui.Select):
@@ -3047,7 +3320,7 @@ def build_panel_embed() -> discord.Embed:
         footer="Sukushi bot | Panel",
     )
     embed.add_field(name="Infos rapides", value="`Solde`  `Daily`  `Classement`", inline=False)
-    embed.add_field(name="Actions", value="`Travail`  `Blackjack`  `Slots`  `Payer`  `Attaquer`", inline=False)
+    embed.add_field(name="Actions", value="`Travail`  `Blackjack`  `Slots`  `Mines`  `Payer`  `Attaquer`", inline=False)
     embed.add_field(name="Métier", value="`Choisir`  `Changer`", inline=False)
     return embed
 
@@ -3550,6 +3823,47 @@ async def run_slots_action(interaction: discord.Interaction) -> None:
     await interaction.edit_original_response(embed=final_embed)
 
 
+async def run_mines_action(interaction: discord.Interaction, mise: int, bombes: int) -> None:
+    if interaction.user.id in ACTIVE_MINES_USERS:
+        await interaction.response.send_message(
+            "Tu as déjà une partie de mines en cours.",
+            ephemeral=True,
+        )
+        return
+
+    ensure_minimum_balance(interaction.user.id)
+    balance_value = get_balance_value(interaction.user.id)
+    if mise > balance_value:
+        await interaction.response.send_message(
+            f"Tu n'as pas assez d'argent. Solde actuel : **{balance_value} Sukushi Dollars**.",
+            ephemeral=True,
+        )
+        return
+
+    new_balance = set_balance_value(interaction.user.id, balance_value - mise)
+    view = MinesView(interaction.user, mise, bombes, interaction.guild)
+    ACTIVE_MINES_USERS.add(interaction.user.id)
+
+    embed = build_mines_embed(
+        interaction.guild,
+        player=interaction.user,
+        bet=mise,
+        bombs=bombes,
+        safe_revealed=0,
+        multiplier=1.0,
+        potential_cashout=mise,
+        title="Casino | Mines",
+        description=(
+            "La grille est prête.\n"
+            "Trouve les sacs de pièces, évite les bombes et récupère tes gains quand tu veux.\n"
+            f"Ton solde après la mise : **{new_balance} Sukushi Dollars**."
+        ),
+        color=SUKUSHI_PINK,
+    )
+    await interaction.response.send_message(embed=embed, view=view)
+    view.message = await interaction.original_response()
+
+
 async def ensure_panel_access(interaction: discord.Interaction) -> bool:
     if not await ensure_not_in_prison(interaction):
         return False
@@ -3706,6 +4020,15 @@ class PanelView(OwnerRestrictedView):
         if not await ensure_panel_access(interaction):
             return
         await run_slots_action(interaction)
+
+    @discord.ui.button(label="Mines", style=discord.ButtonStyle.primary, row=1)
+    async def mines_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await interaction.response.send_message(
+            "Utilise `/mines mise:<montant> bombes:<1-5>` pour lancer une partie de mines.",
+            ephemeral=True,
+        )
 
     @discord.ui.button(label="Payer", style=discord.ButtonStyle.primary, row=1)
     async def pay_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -4081,6 +4404,17 @@ async def blackjack(
 @economy_block()
 async def slots(interaction: discord.Interaction) -> None:
     await run_slots_action(interaction)
+
+
+@bot.tree.command(name="mines", description="Joue une partie de mines interactive.")
+@prison_block()
+@economy_block()
+async def mines(
+    interaction: discord.Interaction,
+    mise: app_commands.Range[int, 1, 1_000_000],
+    bombes: app_commands.Range[int, 1, 5],
+) -> None:
+    await run_mines_action(interaction, mise, bombes)
 
 
 @bot.tree.command(name="mute", description="Timeout a member for a set duration.")
