@@ -113,6 +113,7 @@ EVENT_MAX_GUESSES_PER_USER = 3
 EVENT_FAST_STRING_LENGTH = 15
 EVENT_TYPES = ("guess_number", "fast_string", "quick_math")
 EVENT_TIMEOUT = timedelta(seconds=45)
+EVENT_LOOP_POLL_INTERVAL = 30
 LEVEL_XP_COOLDOWN = timedelta(seconds=60)
 LEVEL_XP_GAIN = (15, 25)
 LEVEL_REWARD = 300
@@ -1567,6 +1568,7 @@ class SukushiBot(discord.Client):
         self.tempban_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
         self.lottery_task: asyncio.Task[None] | None = None
         self.random_event_task: asyncio.Task[None] | None = None
+        self.next_auto_event_at: datetime | None = None
         self.restored_tempbans = False
 
     async def setup_hook(self) -> None:
@@ -1589,6 +1591,8 @@ class SukushiBot(discord.Client):
         await self.seed_existing_member_balances()
         await self.restore_prison_challenges()
         await self.restore_lottery()
+        if self.next_auto_event_at is None:
+            self.next_auto_event_at = datetime.now(timezone.utc)
         if self.random_event_task is None or self.random_event_task.done():
             self.random_event_task = asyncio.create_task(self.run_random_event_loop())
         print("Slash commands are synced and ready.")
@@ -2303,9 +2307,23 @@ class SukushiBot(discord.Client):
     async def run_random_event_loop(self) -> None:
         try:
             while True:
-                await asyncio.sleep(EVENT_INTERVAL.total_seconds())
+                await asyncio.sleep(EVENT_LOOP_POLL_INTERVAL)
                 try:
-                    await self.start_random_event()
+                    if self.next_auto_event_at is None:
+                        self.next_auto_event_at = datetime.now(timezone.utc) + EVENT_INTERVAL
+                        continue
+
+                    now = datetime.now(timezone.utc)
+                    if now < self.next_auto_event_at:
+                        continue
+
+                    success, message = await self.start_random_event()
+                    if success:
+                        self.next_auto_event_at = now + EVENT_INTERVAL
+                    else:
+                        active_state = self.get_active_event_state()
+                        if active_state is None:
+                            self.next_auto_event_at = now + timedelta(minutes=1)
                 except Exception as error:
                     print(f"Random event loop error: {error}")
         except asyncio.CancelledError:
