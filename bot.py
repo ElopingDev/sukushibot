@@ -3,6 +3,7 @@ import json
 import os
 import random
 import re
+import string
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -13,18 +14,21 @@ from economy import (
     add_balance,
     add_ecoban,
     ensure_minimum_balance,
+    get_all_prison_records,
     get_balance_value,
     get_cooldown_remaining,
     get_job,
     get_pair_cooldown_remaining,
-    get_prison_release,
+    get_prison_record,
     get_top_balances,
     imprison_user,
+    is_in_prison,
     is_ecobanned,
     load_economy,
     load_economy_meta,
     load_lottery_state,
     load_json_dict,
+    remove_prison_record,
     remove_ecoban,
     reset_all_balances,
     reset_cooldown_files,
@@ -32,6 +36,7 @@ from economy import (
     save_economy_meta,
     save_lottery_state,
     save_json_dict,
+    set_prison_record,
     set_balance_value,
     set_job,
     update_cooldown,
@@ -83,11 +88,14 @@ WORK_COOLDOWN = timedelta(minutes=45)
 ATTACK_COOLDOWN = timedelta(hours=5)
 GLOBAL_ATTACK_COOLDOWN = timedelta(minutes=15)
 CHANGEJOB_COOLDOWN = timedelta(days=1)
-PRISON_DURATION = timedelta(minutes=15)
 LOTTERY_DURATION = timedelta(hours=24)
 PRISON_CHANCE = 0.15
 LOTTERY_ENTRY_COST = 2000
 LOTTERY_PRIZE = 10000
+JAIL_CATEGORY_NAME = "prison"
+JAIL_CHANNEL_PREFIX = "cellule"
+JAIL_CHALLENGE_LENGTH = 35
+JAIL_MIN_SOLVE_SECONDS = 10
 LEVEL_XP_COOLDOWN = timedelta(seconds=60)
 LEVEL_XP_GAIN = (15, 25)
 LEVEL_REWARD = 300
@@ -139,6 +147,7 @@ ATTACK_AI_DAMAGE = (10, 20)
 ATTACK_STEAL_PERCENT = (0.1, 0.15)
 ACTIVE_ATTACK_USERS: set[int] = set()
 TICKET_OWNER_TOPIC_PREFIX = "ticket_owner:"
+PRISONER_TOPIC_PREFIX = "prisoner:"
 
 AUTOROLE_PANELS = [
     {
@@ -253,18 +262,25 @@ async def ensure_not_in_prison(
     if allow_staff_bypass and can_bypass_prison(interaction.user):
         return True
 
-    release_at = get_prison_release(interaction.user.id)
-    if release_at is None:
+    record = get_prison_record(interaction.user.id)
+    if record is None:
         return True
 
-    remaining = format_remaining_time(release_at - datetime.now(timezone.utc))
+    channel_id = record.get("channel_id")
+    channel_mention = f"<#{channel_id}>" if isinstance(channel_id, int) else "ton salon de prison"
+    message_text = (
+        "Tu es en prison et tu ne peux pas utiliser les commandes économiques pour le moment. "
+        f"Va dans {channel_mention} et retape exactement le code demandé."
+    )
     if interaction.response.is_done():
         await interaction.followup.send(
-            f"Tu es en prison pour encore **{remaining}**. Tu ne peux pas utiliser le bot pour le moment.",
+            message_text,
+            ephemeral=True,
         )
     else:
         await interaction.response.send_message(
-            f"Tu es en prison pour encore **{remaining}**. Tu ne peux pas utiliser le bot pour le moment.",
+            message_text,
+            ephemeral=True,
         )
     return False
 
@@ -353,6 +369,39 @@ def find_open_ticket_channel(guild: discord.Guild, user_id: int) -> discord.Text
         if channel.topic == expected_topic:
             return channel
     return None
+
+
+def make_prison_topic(user_id: int) -> str:
+    return f"{PRISONER_TOPIC_PREFIX}{user_id}"
+
+
+def get_prisoner_id_from_channel(channel: discord.abc.GuildChannel | None) -> int | None:
+    if not isinstance(channel, discord.TextChannel) or channel.topic is None:
+        return None
+    if not channel.topic.startswith(PRISONER_TOPIC_PREFIX):
+        return None
+
+    raw_value = channel.topic.removeprefix(PRISONER_TOPIC_PREFIX)
+    return int(raw_value) if raw_value.isdigit() else None
+
+
+def find_prison_channel(guild: discord.Guild, user_id: int) -> discord.TextChannel | None:
+    expected_topic = make_prison_topic(user_id)
+    for channel in guild.text_channels:
+        if channel.topic == expected_topic:
+            return channel
+    return None
+
+
+def make_prison_channel_name(display_name: str, user_id: int) -> str:
+    base = sanitize_ticket_name(display_name)[:60].strip("-") or "membre"
+    return f"{JAIL_CHANNEL_PREFIX}-{base}-{user_id}"[:100]
+
+
+def generate_prison_challenge(length: int = JAIL_CHALLENGE_LENGTH) -> str:
+    alphabet = string.ascii_letters + string.digits
+    rng = random.SystemRandom()
+    return "".join(rng.choice(alphabet) for _ in range(length))
 
 
 def get_autorole_exclusive_group(role_id: int) -> set[int] | None:
@@ -1014,14 +1063,17 @@ class WorkMinigameView(discord.ui.View):
             action_label = str(action["label"])
 
             if random.random() < catch_chance:
-                release_at = imprison_user(interaction.user.id, PRISON_DURATION)
                 prison_reward = reward // 2
                 new_balance = add_balance(interaction.user.id, prison_reward)
-                remaining = format_remaining_time(release_at - datetime.now(timezone.utc))
+                if isinstance(interaction.user, discord.Member) and isinstance(interaction.client, SukushiBot):
+                    await interaction.client.send_member_to_prison(
+                        interaction.user,
+                        reason=f"Mission ratée : {action_label}",
+                    )
                 result = (
                     f"Tu as choisi **{action_label}**.\n"
                     f"Tu t'es fait attraper. Tu ne gardes que **{prison_reward} Sukushi Dollars** et tu pars en prison.\n"
-                    f"Libération dans **{remaining}**.\n"
+                    "Tu dois maintenant réussir le test dans ton salon de prison pour sortir.\n"
                     f"Nouveau solde : **{new_balance} Sukushi Dollars**."
                 )
             else:
@@ -1301,6 +1353,7 @@ class SukushiBot(discord.Client):
             await self.restore_tempbans()
             self.restored_tempbans = True
         await self.seed_existing_member_balances()
+        await self.restore_prison_challenges()
         await self.restore_lottery()
         print("Slash commands are synced and ready.")
 
@@ -1330,6 +1383,219 @@ class SukushiBot(discord.Client):
         seeded_guilds.add(guild_key)
         save_economy_meta({"seeded_guilds": sorted(seeded_guilds)})
         print(f"Starter balance granted for guild {guild.name} ({guild.id}).")
+
+    async def get_or_create_prison_category(self, guild: discord.Guild) -> discord.CategoryChannel | None:
+        existing = discord.utils.get(guild.categories, name=JAIL_CATEGORY_NAME)
+        if existing is not None:
+            return existing
+
+        try:
+            return await guild.create_category(JAIL_CATEGORY_NAME, reason="Création de la catégorie prison")
+        except discord.HTTPException:
+            return None
+
+    async def get_or_create_prison_channel(self, member: discord.Member) -> discord.TextChannel | None:
+        existing_channel = find_prison_channel(member.guild, member.id)
+        if existing_channel is not None:
+            return existing_channel
+
+        category = await self.get_or_create_prison_category(member.guild)
+        staff_role = get_role_by_id(member.guild, TICKET_STAFF_ROLE_ID)
+        bot_member = get_bot_member(member.guild, self.user)
+
+        overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
+            member.guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            member: discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+            ),
+        }
+        if staff_role is not None:
+            overwrites[staff_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_messages=True,
+            )
+        if bot_member is not None:
+            overwrites[bot_member] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_messages=True,
+            )
+
+        try:
+            return await member.guild.create_text_channel(
+                name=make_prison_channel_name(member.display_name, member.id),
+                category=category,
+                overwrites=overwrites,
+                topic=make_prison_topic(member.id),
+                reason=f"Création de la cellule de prison pour {member}",
+            )
+        except discord.HTTPException:
+            return None
+
+    async def send_prison_challenge(
+        self,
+        member: discord.Member,
+        *,
+        reason: str,
+        penalty_text: str | None = None,
+    ) -> dict[str, object] | None:
+        channel = await self.get_or_create_prison_channel(member)
+        if channel is None:
+            return None
+
+        previous_record = get_prison_record(member.id)
+        jailed_at = datetime.now(timezone.utc).isoformat()
+        attempts = 0
+        if previous_record is not None:
+            previous_jailed_at = previous_record.get("jailed_at")
+            if isinstance(previous_jailed_at, str):
+                jailed_at = previous_jailed_at
+            attempts = int(previous_record.get("attempts", 0))
+
+        challenge = generate_prison_challenge()
+        sent_at = datetime.now(timezone.utc).isoformat()
+        record = set_prison_record(
+            member.id,
+            {
+                "jailed_at": jailed_at,
+                "reason": reason,
+                "channel_id": channel.id,
+                "challenge": challenge,
+                "challenge_sent_at": sent_at,
+                "attempts": attempts + 1,
+            },
+        )
+
+        embed = make_embed(
+            "Test de sortie de prison",
+            (
+                f"{member.mention}, tu es en prison pour **{reason}**.\n"
+                "Retape exactement la chaîne ci-dessous dans ce salon.\n"
+                "Respecte les majuscules et les minuscules.\n"
+                f"N'envoie pas la bonne réponse avant **{JAIL_MIN_SOLVE_SECONDS} secondes**, sinon tu seras considéré comme un tricheur."
+            ),
+            color=discord.Color.red(),
+            footer="Sukushi bot | Prison",
+        )
+        embed.add_field(name="Code", value=f"`{challenge}`", inline=False)
+        embed.add_field(
+            name="Règle anti-copie",
+            value="Si la bonne réponse arrive trop vite, le bot considère que tu as copié-collé.",
+            inline=False,
+        )
+        if penalty_text:
+            embed.add_field(name="Sanction", value=penalty_text, inline=False)
+
+        await channel.send(content=member.mention, embed=embed)
+        return record
+
+    async def send_member_to_prison(self, member: discord.Member, *, reason: str) -> dict[str, object] | None:
+        imprison_user(member.id, reason=reason)
+        return await self.send_prison_challenge(member, reason=reason)
+
+    async def delete_prison_channel_later(self, channel: discord.TextChannel, delay: float = 10.0) -> None:
+        try:
+            await asyncio.sleep(delay)
+            await channel.delete(reason="Défi de prison terminé")
+        except (asyncio.CancelledError, discord.HTTPException):
+            return
+
+    async def handle_prison_message(self, message: discord.Message) -> bool:
+        record = get_prison_record(message.author.id)
+        if record is None:
+            return False
+        if not isinstance(message.author, discord.Member):
+            return False
+
+        channel_id = record.get("channel_id")
+        if not isinstance(channel_id, int) or message.channel.id != channel_id:
+            return False
+
+        challenge = record.get("challenge")
+        if not isinstance(challenge, str) or not challenge:
+            await self.send_prison_challenge(
+                message.author,
+                reason=str(record.get("reason") or "raison inconnue"),
+            )
+            return True
+
+        attempt = message.content.strip()
+        if attempt != challenge:
+            await message.channel.send(
+                f"{message.author.mention} code incorrect. Réessaie en respectant exactement les majuscules et les minuscules."
+            )
+            return True
+
+        sent_at_raw = record.get("challenge_sent_at")
+        sent_at = datetime.now(timezone.utc)
+        if isinstance(sent_at_raw, str):
+            try:
+                sent_at = datetime.fromisoformat(sent_at_raw)
+            except ValueError:
+                sent_at = datetime.now(timezone.utc)
+
+        elapsed = (datetime.now(timezone.utc) - sent_at).total_seconds()
+        if elapsed < JAIL_MIN_SOLVE_SECONDS:
+            current_balance = ensure_minimum_balance(message.author.id)
+            new_balance = set_balance_value(message.author.id, current_balance // 2)
+            await message.channel.send(
+                (
+                    f"{message.author.mention} bien essayé. Réponse correcte en moins de **{JAIL_MIN_SOLVE_SECONDS} secondes** : "
+                    "ça ressemble à un copier-coller.\n"
+                    f"Tu perds **{current_balance - new_balance} Sukushi Dollars** et tu dois recommencer."
+                )
+            )
+            await self.send_prison_challenge(
+                message.author,
+                reason=str(record.get("reason") or "raison inconnue"),
+                penalty_text=f"Perte de 50% de l'argent. Nouveau solde : **{new_balance} Sukushi Dollars**.",
+            )
+            return True
+
+        remove_prison_record(message.author.id)
+        embed = make_embed(
+            "Libération",
+            (
+                f"{message.author.mention} a retapé le code correctement et sort de prison.\n"
+                "Tu peux de nouveau utiliser les commandes économiques."
+            ),
+            color=discord.Color.green(),
+            footer="Sukushi bot | Prison",
+        )
+        await message.channel.send(embed=embed)
+        asyncio.create_task(self.delete_prison_channel_later(message.channel))
+        return True
+
+    async def restore_prison_challenges(self) -> None:
+        guild = self.get_guild(PRIMARY_GUILD_ID)
+        if guild is None:
+            return
+
+        for user_id, record in get_all_prison_records():
+            member = guild.get_member(user_id)
+            if member is None:
+                try:
+                    member = await guild.fetch_member(user_id)
+                except discord.NotFound:
+                    remove_prison_record(user_id)
+                    continue
+                except discord.HTTPException:
+                    continue
+
+            channel_id = record.get("channel_id")
+            challenge = record.get("challenge")
+            channel = guild.get_channel(channel_id) if isinstance(channel_id, int) else None
+            if not isinstance(channel, discord.TextChannel) or not isinstance(challenge, str) or not challenge:
+                await self.send_prison_challenge(
+                    member,
+                    reason=str(record.get("reason") or "raison inconnue"),
+                )
 
     async def restore_tempbans(self) -> None:
         tempbans = load_tempbans()
@@ -1529,6 +1795,8 @@ class SukushiBot(discord.Client):
         if message.author.bot or message.guild is None:
             return
         if not isinstance(message.author, discord.Member):
+            return
+        if await self.handle_prison_message(message):
             return
 
         ensure_minimum_balance(message.author.id)
@@ -1911,11 +2179,9 @@ async def run_attack_action(
         )
         return
 
-    target_prison = get_prison_release(cible.id)
-    if target_prison is not None:
-        remaining = format_remaining_time(target_prison - datetime.now(timezone.utc))
+    if is_in_prison(cible.id):
         await interaction.response.send_message(
-            f"{cible.mention} est déjà en prison pendant encore **{remaining}**.",
+            f"{cible.mention} est déjà en prison et doit finir son épreuve avant de pouvoir rejouer.",
             ephemeral=True,
         )
         return
@@ -2170,7 +2436,6 @@ class PanelView(OwnerRestrictedView):
 
 
 @bot.tree.command(name="ping", description="Check if sukushi bot is online.")
-@prison_block()
 async def ping(interaction: discord.Interaction) -> None:
     latency_ms = round(bot.latency * 1000)
     embed = make_embed(
@@ -2371,11 +2636,9 @@ async def run_attack_action(interaction: discord.Interaction, cible: discord.Mem
             ephemeral=True,
         )
         return
-    target_prison = get_prison_release(cible.id)
-    if target_prison is not None:
-        remaining = format_remaining_time(target_prison - datetime.now(timezone.utc))
+    if is_in_prison(cible.id):
         await interaction.response.send_message(
-            f"{cible.mention} est déjà en prison pendant encore **{remaining}**.",
+            f"{cible.mention} est déjà en prison et doit finir son épreuve avant de pouvoir rejouer.",
             ephemeral=True,
         )
         return
@@ -2868,11 +3131,9 @@ async def attack(
         )
         return
 
-    target_prison = get_prison_release(cible.id)
-    if target_prison is not None:
-        remaining = format_remaining_time(target_prison - datetime.now(timezone.utc))
+    if is_in_prison(cible.id):
         await interaction.response.send_message(
-            f"{cible.mention} est déjà en prison pendant encore **{remaining}**.",
+            f"{cible.mention} est déjà en prison et doit finir son épreuve avant de pouvoir rejouer.",
             ephemeral=True,
         )
         return
@@ -3239,6 +3500,41 @@ async def clear(
     await interaction.followup.send(
         f"{len(deleted)} message(s) supprimé(s).",
     )
+
+
+@bot.tree.command(name="jaillist", description="Affiche les membres actuellement en prison.")
+@prison_block(allow_staff_bypass=True)
+@app_commands.default_permissions(manage_messages=True)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def jaillist(interaction: discord.Interaction) -> None:
+    prisoners = get_all_prison_records()
+    if not prisoners:
+        await interaction.response.send_message(
+            "Personne n'est actuellement en prison.",
+            ephemeral=True,
+        )
+        return
+
+    lines: list[str] = []
+    for user_id, record in prisoners:
+        member = interaction.guild.get_member(user_id) if interaction.guild is not None else None
+        label = member.mention if member is not None else f"<@{user_id}>"
+        reason = str(record.get("reason") or "Aucune raison précisée")
+        channel_id = record.get("channel_id")
+        channel_text = f"<#{channel_id}>" if isinstance(channel_id, int) else "salon manquant"
+        jailed_at = record.get("jailed_at")
+        time_text = jailed_at if isinstance(jailed_at, str) else "inconnue"
+        lines.append(f"{label} • {channel_text} • {reason} • depuis `{time_text}`")
+
+    embed = make_embed(
+        "Membres en prison",
+        "\n".join(lines[:25]),
+        color=discord.Color.red(),
+        footer="Sukushi bot | Prison",
+    )
+    if len(lines) > 25:
+        embed.add_field(name="Note", value=f"{len(lines) - 25} autre(s) membre(s) non affiché(s).", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="lotterypanel", description="Envoie le panneau de la loterie.")

@@ -209,26 +209,165 @@ def set_job(user_id: int, job_key: str) -> None:
     save_json_dict(JOB_FILE, data)
 
 
+def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
+    if isinstance(raw_value, str):
+        return {
+            "jailed_at": raw_value,
+            "reason": "",
+            "channel_id": None,
+            "challenge": "",
+            "challenge_sent_at": None,
+            "attempts": 0,
+        }
+
+    if not isinstance(raw_value, dict):
+        return None
+
+    jailed_at = raw_value.get("jailed_at")
+    if not isinstance(jailed_at, str):
+        jailed_at = datetime.now(timezone.utc).isoformat()
+
+    reason = raw_value.get("reason")
+    if not isinstance(reason, str):
+        reason = ""
+
+    channel_id = raw_value.get("channel_id")
+    if isinstance(channel_id, bool):
+        channel_id = None
+    elif channel_id is not None:
+        try:
+            channel_id = int(channel_id)
+        except (TypeError, ValueError):
+            channel_id = None
+
+    challenge = raw_value.get("challenge")
+    if not isinstance(challenge, str):
+        challenge = ""
+
+    challenge_sent_at = raw_value.get("challenge_sent_at")
+    if not isinstance(challenge_sent_at, str):
+        challenge_sent_at = None
+
+    attempts = raw_value.get("attempts", 0)
+    try:
+        attempts = max(0, int(attempts))
+    except (TypeError, ValueError):
+        attempts = 0
+
+    return {
+        "jailed_at": jailed_at,
+        "reason": reason,
+        "channel_id": channel_id,
+        "challenge": challenge,
+        "challenge_sent_at": challenge_sent_at,
+        "attempts": attempts,
+    }
+
+
+def load_prison_records() -> dict[str, dict[str, object]]:
+    if not PRISON_FILE.exists():
+        return {}
+
+    with PRISON_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    if not isinstance(data, dict):
+        return {}
+
+    normalized: dict[str, dict[str, object]] = {}
+    changed = False
+    for user_id, raw_value in data.items():
+        record = _normalize_prison_record(raw_value)
+        if record is None:
+            changed = True
+            continue
+        normalized[str(user_id)] = record
+        if raw_value != record:
+            changed = True
+
+    if changed:
+        save_prison_records(normalized)
+    return normalized
+
+
+def save_prison_records(data: dict[str, dict[str, object]]) -> None:
+    with PRISON_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
+
+
+def get_prison_record(user_id: int) -> dict[str, object] | None:
+    return load_prison_records().get(str(user_id))
+
+
+def get_all_prison_records() -> list[tuple[int, dict[str, object]]]:
+    data = load_prison_records()
+    result: list[tuple[int, dict[str, object]]] = []
+    for user_id, record in data.items():
+        try:
+            result.append((int(user_id), record))
+        except ValueError:
+            continue
+    return result
+
+
+def set_prison_record(user_id: int, record: dict[str, object]) -> dict[str, object]:
+    normalized = _normalize_prison_record(record)
+    if normalized is None:
+        raise ValueError("Invalid prison record.")
+
+    data = load_prison_records()
+    data[str(user_id)] = normalized
+    save_prison_records(data)
+    return normalized
+
+
+def remove_prison_record(user_id: int) -> bool:
+    data = load_prison_records()
+    if str(user_id) not in data:
+        return False
+    data.pop(str(user_id), None)
+    save_prison_records(data)
+    return True
+
+
+def is_in_prison(user_id: int) -> bool:
+    return get_prison_record(user_id) is not None
+
+
 def get_prison_release(user_id: int) -> datetime | None:
-    data = load_json_dict(PRISON_FILE)
-    raw_value = data.get(str(user_id))
-    if raw_value is None:
+    record = get_prison_record(user_id)
+    if record is None:
         return None
 
-    release_at = datetime.fromisoformat(raw_value)
-    if release_at <= datetime.now(timezone.utc):
-        data.pop(str(user_id), None)
-        save_json_dict(PRISON_FILE, data)
+    raw_value = record.get("challenge_sent_at") or record.get("jailed_at")
+    if not isinstance(raw_value, str):
         return None
-    return release_at
+
+    try:
+        return datetime.fromisoformat(raw_value)
+    except ValueError:
+        return None
 
 
-def imprison_user(user_id: int, duration: timedelta) -> datetime:
-    release_at = datetime.now(timezone.utc) + duration
-    data = load_json_dict(PRISON_FILE)
-    data[str(user_id)] = release_at.isoformat()
-    save_json_dict(PRISON_FILE, data)
-    return release_at
+def imprison_user(
+    user_id: int,
+    duration: timedelta | None = None,
+    *,
+    reason: str = "",
+    channel_id: int | None = None,
+    challenge: str = "",
+    challenge_sent_at: str | None = None,
+) -> dict[str, object]:
+    del duration
+    record = {
+        "jailed_at": datetime.now(timezone.utc).isoformat(),
+        "reason": reason,
+        "channel_id": channel_id,
+        "challenge": challenge,
+        "challenge_sent_at": challenge_sent_at,
+        "attempts": 0,
+    }
+    return set_prison_record(user_id, record)
 
 
 def make_pair_cooldown_key(user_id: int, target_id: int) -> str:
