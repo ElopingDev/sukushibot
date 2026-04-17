@@ -10,7 +10,7 @@ from pathlib import Path
 
 import discord
 from discord import app_commands
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 from economy import (
     add_balance,
@@ -422,43 +422,23 @@ def load_prison_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
 
 def build_prison_challenge_file(challenge: str) -> discord.File:
     width = 920
-    height = 300
+    height = 220
     image = Image.new("RGB", (width, height), color=(248, 240, 234))
     draw = ImageDraw.Draw(image)
-    rng = random.SystemRandom()
-
-    for _ in range(18):
-        x1 = rng.randint(0, width)
-        y1 = rng.randint(0, height)
-        x2 = rng.randint(0, width)
-        y2 = rng.randint(0, height)
-        color = (
-            rng.randint(110, 190),
-            rng.randint(110, 190),
-            rng.randint(110, 190),
-        )
-        draw.line((x1, y1, x2, y2), fill=color, width=rng.randint(1, 3))
-
-    for _ in range(250):
-        x = rng.randint(0, width - 1)
-        y = rng.randint(0, height - 1)
-        draw.point((x, y), fill=(rng.randint(90, 180), rng.randint(90, 180), rng.randint(90, 180)))
 
     title_font = load_prison_font(28)
-    code_font = load_prison_font(40)
+    code_font = load_prison_font(46)
     draw.rounded_rectangle((16, 16, width - 16, height - 16), radius=24, outline=(40, 40, 40), width=3)
     draw.text((32, 28), "Retape exactement ce code dans le salon", font=title_font, fill=(35, 35, 35))
 
     lines = split_prison_challenge_text(challenge)
-    y_positions = (110, 180)
+    y_positions = (95, 145)
     for line, y in zip(lines, y_positions):
         bbox = draw.textbbox((0, 0), line, font=code_font)
         text_width = bbox[2] - bbox[0]
         x = (width - text_width) // 2
-        draw.text((x + 2, y + 2), line, font=code_font, fill=(190, 190, 190))
         draw.text((x, y), line, font=code_font, fill=(25, 25, 25))
 
-    image = image.filter(ImageFilter.GaussianBlur(radius=0.4))
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
     buffer.seek(0)
