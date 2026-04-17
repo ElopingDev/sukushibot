@@ -475,6 +475,28 @@ def build_prison_challenge_file(challenge: str) -> discord.File:
     return discord.File(buffer, filename="prison-code.png")
 
 
+def build_event_string_file(challenge: str) -> discord.File:
+    width = 920
+    height = 220
+    image = Image.new("RGB", (width, height), color=(248, 240, 234))
+    draw = ImageDraw.Draw(image)
+
+    title_font = load_prison_font(28)
+    code_font = load_prison_font(46)
+    draw.rounded_rectangle((16, 16, width - 16, height - 16), radius=24, outline=(40, 40, 40), width=3)
+    draw.text((32, 28), "Retape exactement cette chaîne", font=title_font, fill=(35, 35, 35))
+
+    bbox = draw.textbbox((0, 0), challenge, font=code_font)
+    text_width = bbox[2] - bbox[0]
+    x = (width - text_width) // 2
+    draw.text((x, 110), challenge, font=code_font, fill=(25, 25, 25))
+
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return discord.File(buffer, filename="event-fast-string.png")
+
+
 def get_autorole_exclusive_group(role_id: int) -> set[int] | None:
     for group in AUTOROLE_EXCLUSIVE_ROLE_GROUPS:
         if role_id in group:
@@ -523,22 +545,23 @@ def build_guess_number_event_embed(*, message: str | None = None) -> discord.Emb
     )
 
 
-def build_fast_string_event_embed(challenge_text: str, *, message: str | None = None) -> discord.Embed:
+def build_fast_string_event_embed(*, message: str | None = None) -> discord.Embed:
     description = (
         f"Le premier membre qui retape exactement cette chaîne de **{EVENT_FAST_STRING_LENGTH} caractères** gagne "
         f"**{EVENT_GUESS_REWARD} Sukushi Dollars**.\n"
-        f"Chaîne à retaper : `{challenge_text}`\n"
-        f"Tu as droit à **{EVENT_MAX_GUESSES_PER_USER}** tentatives maximum."
+        "Regarde l'image et retape exactement la chaîne dans ce salon."
     )
     if message:
         description = f"{description}\n\n{message}"
 
-    return make_embed(
+    embed = make_embed(
         "Événement | Chaîne la plus rapide",
         description,
         color=discord.Color.gold(),
         footer="Sukushi bot | Événement",
     )
+    embed.set_image(url="attachment://event-fast-string.png")
+    return embed
 
 
 def build_quick_math_event_embed(problem_text: str, *, message: str | None = None) -> discord.Embed:
@@ -1994,6 +2017,9 @@ class SukushiBot(discord.Client):
         guesses = state.get("guesses")
         if not isinstance(guesses, dict):
             state["guesses"] = {}
+        warned_users = state.get("warned_users")
+        if not isinstance(warned_users, list):
+            state["warned_users"] = []
         return state
 
     async def create_event_message(
@@ -2002,6 +2028,7 @@ class SukushiBot(discord.Client):
         event_type: str,
         answer: int | str,
         embed: discord.Embed,
+        file: discord.File | None = None,
     ) -> tuple[bool, str]:
         current_state = self.get_active_event_state()
         if current_state is not None:
@@ -2011,7 +2038,10 @@ class SukushiBot(discord.Client):
         if channel is None:
             return False, "Le salon des événements est introuvable."
 
-        message = await channel.send(content=f"<@&{LOTTERY_PING_ROLE_ID}>", embed=embed)
+        if file is None:
+            message = await channel.send(content=f"<@&{LOTTERY_PING_ROLE_ID}>", embed=embed)
+        else:
+            message = await channel.send(content=f"<@&{LOTTERY_PING_ROLE_ID}>", embed=embed, file=file)
         save_event_state(
             {
                 "type": event_type,
@@ -2020,6 +2050,7 @@ class SukushiBot(discord.Client):
                 "channel_id": channel.id,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "guesses": {},
+                "warned_users": [],
             }
         )
         return True, f"L'événement a été lancé dans {channel.mention}."
@@ -2038,13 +2069,13 @@ class SukushiBot(discord.Client):
     async def start_fast_string_event(self, *, forced: bool = False) -> tuple[bool, str]:
         challenge_text = generate_fast_string_event_text()
         embed = build_fast_string_event_embed(
-            challenge_text,
             message="Événement forcé par le staff." if forced else None,
         )
         return await self.create_event_message(
             event_type="fast_string",
             answer=challenge_text,
             embed=embed,
+            file=build_event_string_file(challenge_text),
         )
 
     async def start_quick_math_event(self, *, forced: bool = False) -> tuple[bool, str]:
@@ -2092,6 +2123,43 @@ class SukushiBot(discord.Client):
         await channel.send(embed=embed)
         return True
 
+    def consume_numeric_event_attempt(self, state: dict[str, object], user_id: int) -> bool:
+        guesses = state.get("guesses")
+        if not isinstance(guesses, dict):
+            guesses = {}
+
+        guess_key = str(user_id)
+        used_guesses = guesses.get(guess_key, 0)
+        try:
+            used_guesses = int(used_guesses)
+        except (TypeError, ValueError):
+            used_guesses = 0
+
+        if used_guesses >= EVENT_MAX_GUESSES_PER_USER:
+            return False
+
+        guesses[guess_key] = used_guesses + 1
+        state["guesses"] = guesses
+        save_event_state(state)
+        return True
+
+    async def warn_event_attempts_exhausted(self, message: discord.Message, state: dict[str, object]) -> None:
+        warned_users = state.get("warned_users")
+        if not isinstance(warned_users, list):
+            warned_users = []
+
+        user_key = str(message.author.id)
+        if user_key in warned_users:
+            return
+
+        warned_users.append(user_key)
+        state["warned_users"] = warned_users
+        save_event_state(state)
+        await message.reply(
+            f"tu as déjà utilisé tes **{EVENT_MAX_GUESSES_PER_USER}** tentatives pour cet événement.",
+            mention_author=False,
+        )
+
     async def handle_event_message(self, message: discord.Message) -> bool:
         if message.channel.id != EVENT_CHANNEL_ID or not isinstance(message.author, discord.Member):
             return False
@@ -2104,31 +2172,12 @@ class SukushiBot(discord.Client):
         event_type = str(state.get("type"))
         normalized_content = content
 
-        guesses = state.get("guesses")
-        if not isinstance(guesses, dict):
-            guesses = {}
-
-        guess_key = str(message.author.id)
-        used_guesses = guesses.get(guess_key, 0)
-        try:
-            used_guesses = int(used_guesses)
-        except (TypeError, ValueError):
-            used_guesses = 0
-
-        if used_guesses >= EVENT_MAX_GUESSES_PER_USER:
-            await message.reply(
-                f"tu as déjà utilisé tes **{EVENT_MAX_GUESSES_PER_USER}** tentatives pour cet événement.",
-                mention_author=False,
-            )
-            return True
-
-        guesses[guess_key] = used_guesses + 1
-        state["guesses"] = guesses
-        save_event_state(state)
-
         if event_type == "guess_number":
             if not normalized_content.isdigit():
                 return False
+            if not self.consume_numeric_event_attempt(state, message.author.id):
+                await self.warn_event_attempts_exhausted(message, state)
+                return True
             answer = state.get("answer")
             if int(normalized_content) != answer:
                 return False
@@ -2145,6 +2194,9 @@ class SukushiBot(discord.Client):
         if event_type == "quick_math":
             if not re.fullmatch(r"-?\d+", normalized_content):
                 return False
+            if not self.consume_numeric_event_attempt(state, message.author.id):
+                await self.warn_event_attempts_exhausted(message, state)
+                return True
             answer = state.get("answer")
             if normalized_content != answer:
                 return False
