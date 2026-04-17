@@ -3805,7 +3805,7 @@ async def run_slots_action(interaction: discord.Interaction) -> None:
     if jackpot_hit:
         winnings = pot_amount
         final_balance = add_balance(interaction.user.id, winnings)
-        reset_slots_pot()
+        reset_pot_amount = reset_slots_pot()
         final_embed = build_slots_embed(
             guild,
             title="Casino | Jackpot !",
@@ -3816,7 +3816,7 @@ async def run_slots_action(interaction: discord.Interaction) -> None:
                 f"Ton nouveau solde : **{final_balance} Sukushi Dollars**."
             ),
             color=discord.Color.gold(),
-            pot_amount=0,
+            pot_amount=reset_pot_amount,
         )
     else:
         final_embed = build_slots_embed(
