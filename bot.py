@@ -25,6 +25,7 @@ from economy import (
     load_economy_meta,
     load_lottery_state,
     load_json_dict,
+    remove_ecoban,
     reset_all_balances,
     reset_cooldown_files,
     save_economy,
@@ -259,12 +260,10 @@ async def ensure_not_in_prison(
     if interaction.response.is_done():
         await interaction.followup.send(
             f"Tu es en prison pour encore **{remaining}**. Tu ne peux pas utiliser le bot pour le moment.",
-            ephemeral=True,
         )
     else:
         await interaction.response.send_message(
             f"Tu es en prison pour encore **{remaining}**. Tu ne peux pas utiliser le bot pour le moment.",
-            ephemeral=True,
         )
     return False
 
@@ -2958,7 +2957,6 @@ async def mute(
     if moderator is None or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -2966,20 +2964,18 @@ async def mute(
     if bot_member is None:
         await interaction.response.send_message(
             "Je n'arrive pas à vérifier ma hiérarchie dans ce serveur.",
-            ephemeral=True,
         )
         return
 
     allowed, message = can_act_on_target(moderator, member, bot_member)
     if not allowed:
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.response.send_message(message)
         return
 
     parsed_duration = parse_duration(duration)
     if parsed_duration > timedelta(days=28):
         await interaction.response.send_message(
             "Un mute Discord ne peut pas dépasser 28 jours.",
-            ephemeral=True,
         )
         return
 
@@ -2989,7 +2985,6 @@ async def mute(
     )
     await interaction.response.send_message(
         f"{member.mention} a été mute pendant `{format_timedelta(parsed_duration)}`.",
-        ephemeral=True,
     )
 
 
@@ -3002,7 +2997,6 @@ async def mute(
     if moderator is None or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit Ãªtre utilisÃ©e dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -3010,13 +3004,12 @@ async def mute(
     if bot_member is None:
         await interaction.response.send_message(
             "Je n'arrive pas Ã  vÃ©rifier ma hiÃ©rarchie dans ce serveur.",
-            ephemeral=True,
         )
         return
 
     allowed, message = can_act_on_target(moderator, member, bot_member)
     if not allowed:
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.response.send_message(message)
         return
 
     release_at = imprison_user(member.id, TEST_JAIL_DURATION)
@@ -3043,7 +3036,6 @@ async def unmute(
     if moderator is None or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -3051,13 +3043,12 @@ async def unmute(
     if bot_member is None:
         await interaction.response.send_message(
             "Je n'arrive pas à vérifier ma hiérarchie dans ce serveur.",
-            ephemeral=True,
         )
         return
 
     allowed, message = can_act_on_target(moderator, member, bot_member)
     if not allowed:
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.response.send_message(message)
         return
 
     await member.timeout(
@@ -3066,7 +3057,6 @@ async def unmute(
     )
     await interaction.response.send_message(
         f"Le mute de {member.mention} a été retiré.",
-        ephemeral=True,
     )
 
 
@@ -3083,7 +3073,6 @@ async def kick(
     if moderator is None or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -3091,19 +3080,17 @@ async def kick(
     if bot_member is None:
         await interaction.response.send_message(
             "Je n'arrive pas à vérifier ma hiérarchie dans ce serveur.",
-            ephemeral=True,
         )
         return
 
     allowed, message = can_act_on_target(moderator, member, bot_member)
     if not allowed:
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.response.send_message(message)
         return
 
     await member.kick(reason=f"{moderator} | {reason or 'Aucune raison fournie'}")
     await interaction.response.send_message(
         f"{member} a été expulsé du serveur.",
-        ephemeral=True,
     )
 
 
@@ -3120,7 +3107,6 @@ async def ban(
     if moderator is None or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -3128,19 +3114,17 @@ async def ban(
     if bot_member is None:
         await interaction.response.send_message(
             "Je n'arrive pas à vérifier ma hiérarchie dans ce serveur.",
-            ephemeral=True,
         )
         return
 
     allowed, message = can_act_on_target(moderator, member, bot_member)
     if not allowed:
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.response.send_message(message)
         return
 
     await member.ban(reason=f"{moderator} | {reason or 'Aucune raison fournie'}")
     await interaction.response.send_message(
         f"{member} a été banni du serveur.",
-        ephemeral=True,
     )
 
 
@@ -3158,7 +3142,6 @@ async def tempban(
     if moderator is None or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -3166,13 +3149,12 @@ async def tempban(
     if bot_member is None:
         await interaction.response.send_message(
             "Je n'arrive pas à vérifier ma hiérarchie dans ce serveur.",
-            ephemeral=True,
         )
         return
 
     allowed, message = can_act_on_target(moderator, member, bot_member)
     if not allowed:
-        await interaction.response.send_message(message, ephemeral=True)
+        await interaction.response.send_message(message)
         return
 
     parsed_duration = parse_duration(duration)
@@ -3195,7 +3177,6 @@ async def tempban(
     )
     await interaction.response.send_message(
         f"{member} a été banni pendant `{format_timedelta(parsed_duration)}`.",
-        ephemeral=True,
     )
 
 
@@ -3211,7 +3192,6 @@ async def unban(
     if interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -3219,7 +3199,6 @@ async def unban(
     if not cleaned_user_id.isdigit():
         await interaction.response.send_message(
             "L'user ID doit contenir uniquement des chiffres.",
-            ephemeral=True,
         )
         return
 
@@ -3237,7 +3216,6 @@ async def unban(
     )
     await interaction.response.send_message(
         f"L'utilisateur avec l'ID `{user.id}` a été débanni.",
-        ephemeral=True,
     )
 
 
@@ -3252,15 +3230,13 @@ async def clear(
     if not isinstance(interaction.channel, discord.TextChannel):
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans un salon texte.",
-            ephemeral=True,
         )
         return
 
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer()
     deleted = await interaction.channel.purge(limit=amount)
     await interaction.followup.send(
         f"{len(deleted)} message(s) supprimé(s).",
-        ephemeral=True,
     )
 
 
@@ -3420,6 +3396,31 @@ async def ecoban(
     else:
         await interaction.response.send_message(
             f"{member.mention} est deja banni des commandes economiques.",
+            ephemeral=True,
+        )
+
+
+@bot.tree.command(name="ecounban", description="Retire le ban economique d'un utilisateur.")
+@prison_block(allow_staff_bypass=True)
+async def ecounban(
+    interaction: discord.Interaction,
+    member: discord.Member,
+) -> None:
+    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+        await interaction.response.send_message(
+            "Tu n'es pas autorise a utiliser cette commande.",
+            ephemeral=True,
+        )
+        return
+
+    if remove_ecoban(member.id):
+        await interaction.response.send_message(
+            f"{member.mention} peut de nouveau utiliser les commandes economiques.",
+            ephemeral=True,
+        )
+    else:
+        await interaction.response.send_message(
+            f"{member.mention} n'est pas banni des commandes economiques.",
             ephemeral=True,
         )
 

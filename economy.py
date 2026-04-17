@@ -84,6 +84,15 @@ def add_ecoban(user_id: int) -> bool:
     return True
 
 
+def remove_ecoban(user_id: int) -> bool:
+    ecobans = load_ecobans()
+    if user_id not in ecobans:
+        return False
+    ecobans.discard(user_id)
+    save_ecobans(ecobans)
+    return True
+
+
 def get_balance_value(user_id: int) -> int:
     data = load_economy()
     return data.get(str(user_id), 0)
