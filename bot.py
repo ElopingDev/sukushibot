@@ -3894,6 +3894,23 @@ async def run_attack_action(interaction: discord.Interaction, cible: discord.Mem
     if cible.bot:
         await interaction.response.send_message("Tu ne peux pas attaquer un bot.", ephemeral=True)
         return
+    attacker_faction = get_faction_for_member(attacker.id)
+    target_faction = get_faction_for_member(cible.id)
+    if attacker_faction is not None and target_faction is not None:
+        attacker_owner_id, _ = attacker_faction
+        target_owner_id, _ = target_faction
+        if attacker_owner_id == target_owner_id:
+            await interaction.response.send_message(
+                "Tu ne peux pas attaquer un membre de ta propre faction.",
+                ephemeral=True,
+            )
+            return
+        if factions_are_allied(attacker_owner_id, target_owner_id):
+            await interaction.response.send_message(
+                "Tu ne peux pas attaquer un membre d'une faction alliée.",
+                ephemeral=True,
+            )
+            return
     if attacker.id in ACTIVE_ATTACK_USERS or cible.id in ACTIVE_ATTACK_USERS:
         await interaction.response.send_message(
             "Un de ces joueurs est déjà dans un combat. Attends la fin du duel en cours.",
