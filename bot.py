@@ -28,6 +28,7 @@ from economy import (
     is_ecobanned,
     load_economy,
     load_economy_meta,
+    load_event_state,
     load_lottery_state,
     load_json_dict,
     remove_prison_record,
@@ -36,6 +37,7 @@ from economy import (
     reset_cooldown_files,
     save_economy,
     save_economy_meta,
+    save_event_state,
     save_lottery_state,
     save_json_dict,
     set_prison_record,
@@ -59,6 +61,7 @@ GOODBYE_CHANNEL_ID = 1494255913366978641
 AUTOROLE_CHANNEL_ID = 1494255821054414878
 LEVELUP_CHANNEL_ID = 1494255415259693127
 LOTTERY_CHANNEL_ID = 1494473046499786802
+EVENT_CHANNEL_ID = 1494245154939469879
 LOTTERY_PING_ROLE_ID = 1494474779355386027
 TICKET_PANEL_CHANNEL_ID = 1494461780322287667
 JOIN_ROLE_ID = 1494249084221919343
@@ -102,6 +105,10 @@ JAIL_MIN_SOLVE_SECONDS = 10
 JAIL_FAILURE_PERCENT = 0.05
 JAIL_TAX_PERCENT_RANGE = (0.05, 0.12)
 JAIL_VARIANTS = ("normal", "memory", "tax")
+EVENT_INTERVAL = timedelta(minutes=15)
+EVENT_GUESS_MIN = 1
+EVENT_GUESS_MAX = 20
+EVENT_GUESS_REWARD = 550
 LEVEL_XP_COOLDOWN = timedelta(seconds=60)
 LEVEL_XP_GAIN = (15, 25)
 LEVEL_REWARD = 300
@@ -493,6 +500,23 @@ def get_lottery_end_time(state: dict[str, object]) -> datetime | None:
         return datetime.fromisoformat(raw_value)
     except ValueError:
         return None
+
+
+def build_guess_number_event_embed(*, message: str | None = None) -> discord.Embed:
+    description = (
+        f"Le bot a choisi un nombre entre **{EVENT_GUESS_MIN}** et **{EVENT_GUESS_MAX}**.\n"
+        f"Le premier membre qui trouve le bon nombre gagne **{EVENT_GUESS_REWARD} Sukushi Dollars**.\n"
+        "Envoie simplement ton nombre dans ce salon."
+    )
+    if message:
+        description = f"{description}\n\n{message}"
+
+    return make_embed(
+        "Événement | Devine le nombre",
+        description,
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Événement",
+    )
 
 
 def build_lottery_embed(*, ends_at: datetime, participants_count: int) -> discord.Embed:
@@ -1440,6 +1464,7 @@ class SukushiBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
         self.tempban_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
         self.lottery_task: asyncio.Task[None] | None = None
+        self.random_event_task: asyncio.Task[None] | None = None
         self.restored_tempbans = False
 
     async def setup_hook(self) -> None:
@@ -1462,6 +1487,8 @@ class SukushiBot(discord.Client):
         await self.seed_existing_member_balances()
         await self.restore_prison_challenges()
         await self.restore_lottery()
+        if self.random_event_task is None or self.random_event_task.done():
+            self.random_event_task = asyncio.create_task(self.run_random_event_loop())
         print("Slash commands are synced and ready.")
 
     async def seed_existing_member_balances(self) -> None:
@@ -1864,6 +1891,104 @@ class SukushiBot(discord.Client):
                     variant=str(record.get("variant") or "normal"),
                 )
 
+    async def get_event_channel(self) -> discord.TextChannel | None:
+        channel = self.get_channel(EVENT_CHANNEL_ID)
+        return channel if isinstance(channel, discord.TextChannel) else None
+
+    def get_active_event_state(self) -> dict[str, object] | None:
+        state = load_event_state()
+        if state.get("type") != "guess_number":
+            return None
+        answer = state.get("answer")
+        if not isinstance(answer, int):
+            try:
+                answer = int(answer)
+            except (TypeError, ValueError):
+                save_event_state({})
+                return None
+            state["answer"] = answer
+        return state
+
+    async def start_guess_number_event(self, *, forced: bool = False) -> tuple[bool, str]:
+        current_state = self.get_active_event_state()
+        if current_state is not None:
+            return False, "Un événement est déjà en cours dans le salon."
+
+        channel = await self.get_event_channel()
+        if channel is None:
+            return False, "Le salon des événements est introuvable."
+
+        answer = random.randint(EVENT_GUESS_MIN, EVENT_GUESS_MAX)
+        embed = build_guess_number_event_embed(
+            message="Événement forcé par le staff." if forced else None
+        )
+        message = await channel.send(embed=embed)
+        save_event_state(
+            {
+                "type": "guess_number",
+                "answer": answer,
+                "message_id": message.id,
+                "channel_id": channel.id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        return True, f"L'événement a été lancé dans {channel.mention}."
+
+    async def finish_guess_number_event(self, winner: discord.Member) -> bool:
+        state = self.get_active_event_state()
+        if state is None:
+            return False
+
+        reward_total = add_balance(winner.id, EVENT_GUESS_REWARD)
+        save_event_state({})
+
+        channel = await self.get_event_channel()
+        if channel is None:
+            return True
+
+        embed = make_embed(
+            "Événement terminé",
+            (
+                f"{winner.mention} a trouvé le bon nombre en premier.\n"
+                f"Récompense : **{EVENT_GUESS_REWARD} Sukushi Dollars**.\n"
+                f"Nouveau solde : **{reward_total} Sukushi Dollars**."
+            ),
+            color=discord.Color.green(),
+            footer="Sukushi bot | Événement",
+        )
+        await channel.send(embed=embed)
+        return True
+
+    async def handle_event_message(self, message: discord.Message) -> bool:
+        if message.channel.id != EVENT_CHANNEL_ID or not isinstance(message.author, discord.Member):
+            return False
+
+        state = self.get_active_event_state()
+        if state is None:
+            return False
+
+        content = message.content.strip()
+        if not content.isdigit():
+            return False
+
+        guess = int(content)
+        if guess != state.get("answer"):
+            return False
+
+        await self.finish_guess_number_event(message.author)
+        return True
+
+    async def run_random_event_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(EVENT_INTERVAL.total_seconds())
+                try:
+                    await self.start_guess_number_event()
+                except Exception as error:
+                    print(f"Random event loop error: {error}")
+        except asyncio.CancelledError:
+            return
+
     async def restore_tempbans(self) -> None:
         tempbans = load_tempbans()
         now = datetime.now(timezone.utc)
@@ -2064,6 +2189,8 @@ class SukushiBot(discord.Client):
         if not isinstance(message.author, discord.Member):
             return
         if await self.handle_prison_message(message):
+            return
+        if await self.handle_event_message(message):
             return
 
         ensure_minimum_balance(message.author.id)
@@ -3811,6 +3938,15 @@ async def jaillist(interaction: discord.Interaction) -> None:
     if len(lines) > 25:
         embed.add_field(name="Note", value=f"{len(lines) - 25} autre(s) membre(s) non affiché(s).", inline=False)
     await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="forceevent", description="Lance immédiatement un événement pour les tests.")
+@prison_block(allow_staff_bypass=True)
+@app_commands.default_permissions(manage_messages=True)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def forceevent(interaction: discord.Interaction) -> None:
+    success, message = await bot.start_guess_number_event(forced=True)
+    await interaction.response.send_message(message, ephemeral=True)
 
 
 @bot.tree.command(name="lotterypanel", description="Envoie le panneau de la loterie.")

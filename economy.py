@@ -12,6 +12,7 @@ ATTACK_FILE = Path("attack_cooldowns.json")
 CHANGEJOB_FILE = Path("changejob.json")
 LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
+EVENT_FILE = Path("event.json")
 
 
 def load_economy() -> dict[str, int]:
@@ -169,6 +170,21 @@ def load_lottery_state() -> dict[str, object]:
 
 def save_lottery_state(data: dict[str, object]) -> None:
     with LOTTERY_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
+
+
+def load_event_state() -> dict[str, object]:
+    if not EVENT_FILE.exists():
+        return {}
+
+    with EVENT_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    return data if isinstance(data, dict) else {}
+
+
+def save_event_state(data: dict[str, object]) -> None:
+    with EVENT_FILE.open("w", encoding="utf-8") as file:
         json.dump(data, file, indent=2, ensure_ascii=False)
 
 
