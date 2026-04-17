@@ -121,7 +121,8 @@ SLOTS_COST = 100
 SLOTS_JACKPOT_CHANCE = 0.10
 MINES_GRID_SIZE = 4
 MINES_TOTAL_TILES = MINES_GRID_SIZE * MINES_GRID_SIZE
-MINES_HOUSE_EDGE = 0.95
+MINES_HOUSE_EDGE = 0.78
+MINES_MIN_CASHOUT_SAFE = 3
 LEVEL_XP_COOLDOWN = timedelta(seconds=60)
 LEVEL_XP_GAIN = (15, 25)
 LEVEL_REWARD = 300
@@ -686,6 +687,12 @@ def calculate_mines_multiplier(bombs: int, safe_revealed: int) -> float:
     safe_tiles = MINES_TOTAL_TILES - bombs
     for index in range(safe_revealed):
         multiplier *= (MINES_TOTAL_TILES - index) / (safe_tiles - index)
+    early_penalty = {
+        1: 0.35,
+        2: 0.52,
+        3: 0.72,
+    }
+    multiplier *= early_penalty.get(safe_revealed, 1.0)
     return multiplier
 
 
@@ -1212,7 +1219,7 @@ class MinesView(discord.ui.View):
     def get_cashout_amount(self) -> int:
         if self.safe_revealed <= 0:
             return self.bet
-        return max(self.bet, int(round(self.bet * self.get_multiplier())))
+        return max(0, int(self.bet * self.get_multiplier()))
 
     def build_active_embed(self) -> discord.Embed:
         cashout_amount = self.get_cashout_amount()
@@ -1227,7 +1234,7 @@ class MinesView(discord.ui.View):
             title="Casino | Mines",
             description=(
                 "Clique sur les cases pour trouver les sacs de pièces sans toucher une bombe.\n"
-                "Tu peux récupérer ton gain à tout moment après au moins une case sûre."
+                f"Tu peux récupérer ton gain à partir de **{MINES_MIN_CASHOUT_SAFE} cases sûres**."
             ),
             color=SUKUSHI_PINK,
         )
@@ -1361,8 +1368,13 @@ class MinesView(discord.ui.View):
         button.emoji = self.coinbag_symbol
 
         cashout_amount = self.get_cashout_amount()
-        self.cashout_button.disabled = False
-        self.cashout_button.label = f"Récupérer {cashout_amount}"
+        if self.safe_revealed >= MINES_MIN_CASHOUT_SAFE:
+            self.cashout_button.disabled = False
+            self.cashout_button.label = f"Récupérer {cashout_amount}"
+        else:
+            remaining_safe = MINES_MIN_CASHOUT_SAFE - self.safe_revealed
+            self.cashout_button.disabled = True
+            self.cashout_button.label = f"Encore {remaining_safe}"
 
         if self.safe_revealed >= MINES_TOTAL_TILES - self.bombs:
             await self.finish_win(interaction, perfect_clear=True)
@@ -1376,9 +1388,9 @@ class MinesView(discord.ui.View):
     async def cashout(self, interaction: discord.Interaction) -> None:
         if self.finished:
             return
-        if self.safe_revealed <= 0:
+        if self.safe_revealed < MINES_MIN_CASHOUT_SAFE:
             await interaction.response.send_message(
-                "Tu dois révéler au moins une case sûre avant de récupérer tes gains.",
+                f"Tu dois révéler au moins **{MINES_MIN_CASHOUT_SAFE}** cases sûres avant de récupérer tes gains.",
                 ephemeral=True,
             )
             return
@@ -3856,6 +3868,7 @@ async def run_mines_action(interaction: discord.Interaction, mise: int, bombes: 
         description=(
             "La grille est prête.\n"
             "Trouve les sacs de pièces, évite les bombes et récupère tes gains quand tu veux.\n"
+            f"Le cashout se débloque à partir de **{MINES_MIN_CASHOUT_SAFE} cases sûres**.\n"
             f"Ton solde après la mise : **{new_balance} Sukushi Dollars**."
         ),
         color=SUKUSHI_PINK,
@@ -4920,6 +4933,58 @@ async def resetmoney(
     new_balance = set_balance_value(member.id, 0)
     await interaction.response.send_message(
         f"L'argent de {member.mention} a été réinitialisé à **{new_balance} Sukushi Dollars**.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="staffgive", description="Ajoute de l'argent à un utilisateur.")
+@prison_block(allow_staff_bypass=True)
+async def staffgive(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    montant: app_commands.Range[int, 1, 1_000_000],
+) -> None:
+    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+        await interaction.response.send_message(
+            "Tu n'es pas autorisé à utiliser cette commande.",
+            ephemeral=True,
+        )
+        return
+
+    ensure_minimum_balance(member.id)
+    new_balance = add_balance(member.id, montant)
+    await interaction.response.send_message(
+        (
+            f"**{montant} Sukushi Dollars** ont été ajoutés à {member.mention}.\n"
+            f"Nouveau solde : **{new_balance} Sukushi Dollars**."
+        ),
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="stafftake", description="Retire de l'argent à un utilisateur.")
+@prison_block(allow_staff_bypass=True)
+async def stafftake(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    montant: app_commands.Range[int, 1, 1_000_000],
+) -> None:
+    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+        await interaction.response.send_message(
+            "Tu n'es pas autorisé à utiliser cette commande.",
+            ephemeral=True,
+        )
+        return
+
+    ensure_minimum_balance(member.id)
+    current_balance = get_balance_value(member.id)
+    removed_amount = min(current_balance, montant)
+    new_balance = set_balance_value(member.id, current_balance - removed_amount)
+    await interaction.response.send_message(
+        (
+            f"**{removed_amount} Sukushi Dollars** ont été retirés à {member.mention}.\n"
+            f"Nouveau solde : **{new_balance} Sukushi Dollars**."
+        ),
         ephemeral=True,
     )
 
