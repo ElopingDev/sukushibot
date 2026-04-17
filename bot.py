@@ -107,8 +107,11 @@ JAIL_TAX_PERCENT_RANGE = (0.05, 0.12)
 JAIL_VARIANTS = ("normal", "memory", "tax")
 EVENT_INTERVAL = timedelta(minutes=15)
 EVENT_GUESS_MIN = 1
-EVENT_GUESS_MAX = 20
+EVENT_GUESS_MAX = 15
 EVENT_GUESS_REWARD = 550
+EVENT_MAX_GUESSES_PER_USER = 3
+EVENT_FAST_STRING_LENGTH = 15
+EVENT_TYPES = ("guess_number", "fast_string", "quick_math")
 LEVEL_XP_COOLDOWN = timedelta(seconds=60)
 LEVEL_XP_GAIN = (15, 25)
 LEVEL_REWARD = 300
@@ -506,7 +509,8 @@ def build_guess_number_event_embed(*, message: str | None = None) -> discord.Emb
     description = (
         f"Le bot a choisi un nombre entre **{EVENT_GUESS_MIN}** et **{EVENT_GUESS_MAX}**.\n"
         f"Le premier membre qui trouve le bon nombre gagne **{EVENT_GUESS_REWARD} Sukushi Dollars**.\n"
-        "Envoie simplement ton nombre dans ce salon."
+        f"Envoie simplement ton nombre dans ce salon.\n"
+        f"Tu as droit à **{EVENT_MAX_GUESSES_PER_USER}** tentatives maximum."
     )
     if message:
         description = f"{description}\n\n{message}"
@@ -517,6 +521,64 @@ def build_guess_number_event_embed(*, message: str | None = None) -> discord.Emb
         color=discord.Color.gold(),
         footer="Sukushi bot | Événement",
     )
+
+
+def build_fast_string_event_embed(challenge_text: str, *, message: str | None = None) -> discord.Embed:
+    description = (
+        f"Le premier membre qui retape exactement cette chaîne de **{EVENT_FAST_STRING_LENGTH} caractères** gagne "
+        f"**{EVENT_GUESS_REWARD} Sukushi Dollars**.\n"
+        f"Chaîne à retaper : `{challenge_text}`\n"
+        f"Tu as droit à **{EVENT_MAX_GUESSES_PER_USER}** tentatives maximum."
+    )
+    if message:
+        description = f"{description}\n\n{message}"
+
+    return make_embed(
+        "Événement | Chaîne la plus rapide",
+        description,
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Événement",
+    )
+
+
+def build_quick_math_event_embed(problem_text: str, *, message: str | None = None) -> discord.Embed:
+    description = (
+        f"Le premier membre qui donne la bonne réponse gagne **{EVENT_GUESS_REWARD} Sukushi Dollars**.\n"
+        f"Calcul : **{problem_text}**\n"
+        f"Tu as droit à **{EVENT_MAX_GUESSES_PER_USER}** tentatives maximum."
+    )
+    if message:
+        description = f"{description}\n\n{message}"
+
+    return make_embed(
+        "Événement | Calcul express",
+        description,
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Événement",
+    )
+
+
+def generate_fast_string_event_text(length: int = EVENT_FAST_STRING_LENGTH) -> str:
+    alphabet = string.ascii_letters + string.digits
+    rng = random.SystemRandom()
+    return "".join(rng.choice(alphabet) for _ in range(length))
+
+
+def generate_quick_math_event() -> tuple[str, str]:
+    operation = random.choice(("+", "-", "*"))
+    if operation == "+":
+        left = random.randint(10, 60)
+        right = random.randint(10, 60)
+        answer = left + right
+    elif operation == "-":
+        left = random.randint(30, 90)
+        right = random.randint(5, left)
+        answer = left - right
+    else:
+        left = random.randint(2, 12)
+        right = random.randint(2, 12)
+        answer = left * right
+    return f"{left} {operation} {right}", str(answer)
 
 
 def build_lottery_embed(*, ends_at: datetime, participants_count: int) -> discord.Embed:
@@ -1897,19 +1959,34 @@ class SukushiBot(discord.Client):
 
     def get_active_event_state(self) -> dict[str, object] | None:
         state = load_event_state()
-        if state.get("type") != "guess_number":
+        event_type = state.get("type")
+        if event_type not in EVENT_TYPES:
             return None
         answer = state.get("answer")
-        if not isinstance(answer, int):
-            try:
-                answer = int(answer)
-            except (TypeError, ValueError):
+        if event_type == "guess_number":
+            if not isinstance(answer, int):
+                try:
+                    answer = int(answer)
+                except (TypeError, ValueError):
+                    save_event_state({})
+                    return None
+                state["answer"] = answer
+        else:
+            if not isinstance(answer, str):
                 save_event_state({})
                 return None
-            state["answer"] = answer
+        guesses = state.get("guesses")
+        if not isinstance(guesses, dict):
+            state["guesses"] = {}
         return state
 
-    async def start_guess_number_event(self, *, forced: bool = False) -> tuple[bool, str]:
+    async def create_event_message(
+        self,
+        *,
+        event_type: str,
+        answer: int | str,
+        embed: discord.Embed,
+    ) -> tuple[bool, str]:
         current_state = self.get_active_event_state()
         if current_state is not None:
             return False, "Un événement est déjà en cours dans le salon."
@@ -1918,23 +1995,63 @@ class SukushiBot(discord.Client):
         if channel is None:
             return False, "Le salon des événements est introuvable."
 
-        answer = random.randint(EVENT_GUESS_MIN, EVENT_GUESS_MAX)
-        embed = build_guess_number_event_embed(
-            message="Événement forcé par le staff." if forced else None
-        )
-        message = await channel.send(embed=embed)
+        message = await channel.send(content=f"<@&{LOTTERY_PING_ROLE_ID}>", embed=embed)
         save_event_state(
             {
-                "type": "guess_number",
+                "type": event_type,
                 "answer": answer,
                 "message_id": message.id,
                 "channel_id": channel.id,
                 "created_at": datetime.now(timezone.utc).isoformat(),
+                "guesses": {},
             }
         )
         return True, f"L'événement a été lancé dans {channel.mention}."
 
-    async def finish_guess_number_event(self, winner: discord.Member) -> bool:
+    async def start_guess_number_event(self, *, forced: bool = False) -> tuple[bool, str]:
+        answer = random.randint(EVENT_GUESS_MIN, EVENT_GUESS_MAX)
+        embed = build_guess_number_event_embed(
+            message="Événement forcé par le staff." if forced else None
+        )
+        return await self.create_event_message(
+            event_type="guess_number",
+            answer=answer,
+            embed=embed,
+        )
+
+    async def start_fast_string_event(self, *, forced: bool = False) -> tuple[bool, str]:
+        challenge_text = generate_fast_string_event_text()
+        embed = build_fast_string_event_embed(
+            challenge_text,
+            message="Événement forcé par le staff." if forced else None,
+        )
+        return await self.create_event_message(
+            event_type="fast_string",
+            answer=challenge_text,
+            embed=embed,
+        )
+
+    async def start_quick_math_event(self, *, forced: bool = False) -> tuple[bool, str]:
+        problem_text, answer = generate_quick_math_event()
+        embed = build_quick_math_event_embed(
+            problem_text,
+            message="Événement forcé par le staff." if forced else None,
+        )
+        return await self.create_event_message(
+            event_type="quick_math",
+            answer=answer,
+            embed=embed,
+        )
+
+    async def start_random_event(self, *, forced: bool = False) -> tuple[bool, str]:
+        event_type = random.choice(EVENT_TYPES)
+        if event_type == "fast_string":
+            return await self.start_fast_string_event(forced=forced)
+        if event_type == "quick_math":
+            return await self.start_quick_math_event(forced=forced)
+        return await self.start_guess_number_event(forced=forced)
+
+    async def finish_event(self, winner: discord.Member, *, win_text: str) -> bool:
         state = self.get_active_event_state()
         if state is None:
             return False
@@ -1949,7 +2066,7 @@ class SukushiBot(discord.Client):
         embed = make_embed(
             "Événement terminé",
             (
-                f"{winner.mention} a trouvé le bon nombre en premier.\n"
+                f"{winner.mention} {win_text}\n"
                 f"Récompense : **{EVENT_GUESS_REWARD} Sukushi Dollars**.\n"
                 f"Nouveau solde : **{reward_total} Sukushi Dollars**."
             ),
@@ -1968,22 +2085,64 @@ class SukushiBot(discord.Client):
             return False
 
         content = message.content.strip()
-        if not content.isdigit():
-            return False
+        event_type = str(state.get("type"))
+        normalized_content = content
 
-        guess = int(content)
-        if guess != state.get("answer"):
-            return False
+        guesses = state.get("guesses")
+        if not isinstance(guesses, dict):
+            guesses = {}
 
-        await self.finish_guess_number_event(message.author)
-        return True
+        guess_key = str(message.author.id)
+        used_guesses = guesses.get(guess_key, 0)
+        try:
+            used_guesses = int(used_guesses)
+        except (TypeError, ValueError):
+            used_guesses = 0
+
+        if used_guesses >= EVENT_MAX_GUESSES_PER_USER:
+            await message.reply(
+                f"tu as déjà utilisé tes **{EVENT_MAX_GUESSES_PER_USER}** tentatives pour cet événement.",
+                mention_author=False,
+            )
+            return True
+
+        guesses[guess_key] = used_guesses + 1
+        state["guesses"] = guesses
+        save_event_state(state)
+
+        if event_type == "guess_number":
+            if not normalized_content.isdigit():
+                return False
+            answer = state.get("answer")
+            if int(normalized_content) != answer:
+                return False
+            await self.finish_event(message.author, win_text="a trouvé le bon nombre en premier.")
+            return True
+
+        if event_type == "fast_string":
+            answer = state.get("answer")
+            if normalized_content != answer:
+                return False
+            await self.finish_event(message.author, win_text="a retapé la chaîne en premier.")
+            return True
+
+        if event_type == "quick_math":
+            if not re.fullmatch(r"-?\d+", normalized_content):
+                return False
+            answer = state.get("answer")
+            if normalized_content != answer:
+                return False
+            await self.finish_event(message.author, win_text="a résolu le calcul en premier.")
+            return True
+
+        return False
 
     async def run_random_event_loop(self) -> None:
         try:
             while True:
                 await asyncio.sleep(EVENT_INTERVAL.total_seconds())
                 try:
-                    await self.start_guess_number_event()
+                    await self.start_random_event()
                 except Exception as error:
                     print(f"Random event loop error: {error}")
         except asyncio.CancelledError:
@@ -3945,7 +4104,7 @@ async def jaillist(interaction: discord.Interaction) -> None:
 @app_commands.default_permissions(manage_messages=True)
 @app_commands.checks.has_permissions(manage_messages=True)
 async def forceevent(interaction: discord.Interaction) -> None:
-    success, message = await bot.start_guess_number_event(forced=True)
+    success, message = await bot.start_random_event(forced=True)
     await interaction.response.send_message(message, ephemeral=True)
 
 
