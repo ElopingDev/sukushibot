@@ -3478,7 +3478,7 @@ async def run_slots_action(interaction: discord.Interaction) -> None:
 
     guild = interaction.guild
     slot_symbol = get_custom_emoji_text(guild, "slot", fallback="🎰")
-    coin_symbol = get_custom_emoji_text(guild, "coin", fallback="🪙")
+    coin_symbol = get_custom_emoji_text(guild, "coinbag", fallback="🪙")
     miss_symbol = "✖️"
 
     new_balance = set_balance_value(interaction.user.id, balance_value - SLOTS_COST)

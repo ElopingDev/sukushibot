@@ -14,6 +14,7 @@ LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
 EVENT_FILE = Path("event.json")
 SLOTS_FILE = Path("slots.json")
+DEFAULT_SLOTS_POT = 1000
 
 
 def load_economy() -> dict[str, int]:
@@ -191,19 +192,19 @@ def save_event_state(data: dict[str, object]) -> None:
 
 def load_slots_state() -> dict[str, int]:
     if not SLOTS_FILE.exists():
-        return {"pot": 0}
+        return {"pot": DEFAULT_SLOTS_POT}
 
     with SLOTS_FILE.open("r", encoding="utf-8") as file:
         data = json.load(file)
 
     if not isinstance(data, dict):
-        return {"pot": 0}
+        return {"pot": DEFAULT_SLOTS_POT}
 
     pot = data.get("pot", 0)
     try:
         pot = max(0, int(pot))
     except (TypeError, ValueError):
-        pot = 0
+        pot = DEFAULT_SLOTS_POT
     return {"pot": pot}
 
 
