@@ -13,6 +13,7 @@ CHANGEJOB_FILE = Path("changejob.json")
 LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
 EVENT_FILE = Path("event.json")
+SLOTS_FILE = Path("slots.json")
 
 
 def load_economy() -> dict[str, int]:
@@ -186,6 +187,45 @@ def load_event_state() -> dict[str, object]:
 def save_event_state(data: dict[str, object]) -> None:
     with EVENT_FILE.open("w", encoding="utf-8") as file:
         json.dump(data, file, indent=2, ensure_ascii=False)
+
+
+def load_slots_state() -> dict[str, int]:
+    if not SLOTS_FILE.exists():
+        return {"pot": 0}
+
+    with SLOTS_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    if not isinstance(data, dict):
+        return {"pot": 0}
+
+    pot = data.get("pot", 0)
+    try:
+        pot = max(0, int(pot))
+    except (TypeError, ValueError):
+        pot = 0
+    return {"pot": pot}
+
+
+def save_slots_state(data: dict[str, int]) -> None:
+    with SLOTS_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
+
+
+def get_slots_pot() -> int:
+    return load_slots_state().get("pot", 0)
+
+
+def add_slots_pot(amount: int) -> int:
+    state = load_slots_state()
+    state["pot"] = max(0, int(state.get("pot", 0)) + int(amount))
+    save_slots_state(state)
+    return state["pot"]
+
+
+def reset_slots_pot() -> int:
+    save_slots_state({"pot": 0})
+    return 0
 
 
 def reset_cooldown_files() -> None:

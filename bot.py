@@ -22,6 +22,7 @@ from economy import (
     get_job,
     get_pair_cooldown_remaining,
     get_prison_record,
+    get_slots_pot,
     get_top_balances,
     imprison_user,
     is_in_prison,
@@ -34,6 +35,7 @@ from economy import (
     remove_prison_record,
     remove_ecoban,
     reset_all_balances,
+    reset_slots_pot,
     reset_cooldown_files,
     save_economy,
     save_economy_meta,
@@ -43,6 +45,7 @@ from economy import (
     set_prison_record,
     set_balance_value,
     set_job,
+    add_slots_pot,
     update_cooldown,
     update_pair_cooldown,
 )
@@ -105,7 +108,6 @@ JAIL_MIN_SOLVE_SECONDS = 10
 JAIL_FAILURE_PERCENT = 0.05
 JAIL_TAX_PERCENT_RANGE = (0.05, 0.12)
 JAIL_VARIANTS = ("normal", "memory", "tax")
-EVENT_INTERVAL = timedelta(minutes=15)
 EVENT_GUESS_MIN = 1
 EVENT_GUESS_MAX = 15
 EVENT_GUESS_REWARD = 550
@@ -114,6 +116,9 @@ EVENT_FAST_STRING_LENGTH = 15
 EVENT_TYPES = ("guess_number", "fast_string", "quick_math")
 EVENT_TIMEOUT = timedelta(seconds=45)
 EVENT_LOOP_POLL_INTERVAL = 30
+EVENT_INTERVAL = timedelta(minutes=30)
+SLOTS_COST = 100
+SLOTS_JACKPOT_CHANCE = 0.10
 LEVEL_XP_COOLDOWN = timedelta(seconds=60)
 LEVEL_XP_GAIN = (15, 25)
 LEVEL_REWARD = 300
@@ -646,6 +651,27 @@ def build_lottery_start_message() -> str:
         f"<@&{LOTTERY_PING_ROLE_ID}> une nouvelle loterie vient de commencer !\n"
         f"Clique sur le bouton pour participer pour **{LOTTERY_ENTRY_COST} Sukushi Dollars**."
     )
+
+
+def build_slots_embed(
+    guild: discord.Guild | None,
+    *,
+    title: str,
+    symbols: list[str],
+    description: str,
+    color: discord.Color,
+    pot_amount: int,
+) -> discord.Embed:
+    embed = make_embed(
+        title,
+        description,
+        color=color,
+        footer="Sukushi bot | Slots",
+    )
+    embed.add_field(name="Machine", value=" ".join(symbols), inline=False)
+    embed.add_field(name="Pot global", value=f"**{pot_amount} Sukushi Dollars**", inline=True)
+    embed.add_field(name="Mise", value=f"**{SLOTS_COST} Sukushi Dollars**", inline=True)
+    return embed
 
 
 def parse_duration(value: str) -> timedelta:
@@ -1569,7 +1595,6 @@ class SukushiBot(discord.Client):
         self.lottery_task: asyncio.Task[None] | None = None
         self.random_event_task: asyncio.Task[None] | None = None
         self.next_auto_event_at: datetime | None = None
-        self.startup_event_attempted = False
         self.restored_tempbans = False
 
     async def setup_hook(self) -> None:
@@ -1585,22 +1610,9 @@ class SukushiBot(discord.Client):
     async def on_ready(self) -> None:
         if self.user is None:
             return
-        print(f"Logged in as {self.user} (ID: {self.user.id})", flush=True)
+        print(f"Logged in as {self.user} (ID: {self.user.id})")
         if self.random_event_task is None or self.random_event_task.done():
             self.random_event_task = asyncio.create_task(self.run_random_event_loop())
-        if not self.startup_event_attempted:
-            self.startup_event_attempted = True
-            print("Attempting startup random event...", flush=True)
-            await asyncio.sleep(3)
-            if self.get_active_event_state() is None:
-                success, message = await self.start_random_event()
-                if success:
-                    self.next_auto_event_at = datetime.now(timezone.utc) + EVENT_INTERVAL
-                    print("Initial random event launched on startup.", flush=True)
-                else:
-                    print(f"Initial random event not launched: {message}", flush=True)
-            else:
-                print("Initial random event skipped: active event already exists.", flush=True)
         if not self.restored_tempbans:
             await self.restore_tempbans()
             self.restored_tempbans = True
@@ -1610,7 +1622,7 @@ class SukushiBot(discord.Client):
         now = datetime.now(timezone.utc)
         if self.next_auto_event_at is None:
             self.next_auto_event_at = now + EVENT_INTERVAL
-        print("Slash commands are synced and ready.", flush=True)
+        print("Slash commands are synced and ready.")
 
     async def seed_existing_member_balances(self) -> None:
         meta = load_economy_meta()
@@ -2355,14 +2367,12 @@ class SukushiBot(discord.Client):
                     success, message = await self.start_random_event()
                     if success:
                         self.next_auto_event_at = now + EVENT_INTERVAL
-                        print(f"Automatic random event launched: {message}", flush=True)
                     else:
                         active_state = self.get_active_event_state()
                         if active_state is None:
                             self.next_auto_event_at = now + timedelta(minutes=1)
-                        print(f"Automatic random event not launched: {message}", flush=True)
                 except Exception as error:
-                    print(f"Random event loop error: {error}", flush=True)
+                    print(f"Random event loop error: {error}")
         except asyncio.CancelledError:
             return
 
@@ -3037,7 +3047,7 @@ def build_panel_embed() -> discord.Embed:
         footer="Sukushi bot | Panel",
     )
     embed.add_field(name="Infos rapides", value="`Solde`  `Daily`  `Classement`", inline=False)
-    embed.add_field(name="Actions", value="`Travail`  `Blackjack`  `Payer`  `Attaquer`", inline=False)
+    embed.add_field(name="Actions", value="`Travail`  `Blackjack`  `Slots`  `Payer`  `Attaquer`", inline=False)
     embed.add_field(name="Métier", value="`Choisir`  `Changer`", inline=False)
     return embed
 
@@ -3456,6 +3466,90 @@ async def run_blackjack_action(interaction: discord.Interaction, mise: int) -> N
     await view.start_game(interaction)
 
 
+async def run_slots_action(interaction: discord.Interaction) -> None:
+    ensure_minimum_balance(interaction.user.id)
+    balance_value = get_balance_value(interaction.user.id)
+    if balance_value < SLOTS_COST:
+        await interaction.response.send_message(
+            f"Tu n'as pas assez d'argent. Il faut **{SLOTS_COST} Sukushi Dollars** pour jouer aux slots.",
+            ephemeral=True,
+        )
+        return
+
+    guild = interaction.guild
+    slot_symbol = get_custom_emoji_text(guild, "slot", fallback="🎰")
+    coin_symbol = get_custom_emoji_text(guild, "coin", fallback="🪙")
+    miss_symbol = "✖️"
+
+    new_balance = set_balance_value(interaction.user.id, balance_value - SLOTS_COST)
+    pot_amount = add_slots_pot(SLOTS_COST)
+
+    await interaction.response.defer(thinking=True)
+
+    spinning_embed = build_slots_embed(
+        guild,
+        title="Casino | Slots",
+        symbols=[slot_symbol, slot_symbol, slot_symbol],
+        description=(
+            f"{interaction.user.mention} lance les rouleaux...\n"
+            f"Entrée : **{SLOTS_COST} Sukushi Dollars**.\n"
+            f"Ton solde après la mise : **{new_balance} Sukushi Dollars**."
+        ),
+        color=SUKUSHI_PINK,
+        pot_amount=pot_amount,
+    )
+    await interaction.edit_original_response(embed=spinning_embed)
+
+    await asyncio.sleep(1.1)
+    mid_symbols = [random.choice((coin_symbol, miss_symbol)), slot_symbol, slot_symbol]
+    await interaction.edit_original_response(
+        embed=build_slots_embed(
+            guild,
+            title="Casino | Slots",
+            symbols=mid_symbols,
+            description="Les rouleaux ralentissent...",
+            color=SUKUSHI_PINK,
+            pot_amount=pot_amount,
+        )
+    )
+
+    await asyncio.sleep(0.9)
+    jackpot_hit = random.random() < SLOTS_JACKPOT_CHANCE
+    final_symbols = [coin_symbol, coin_symbol, coin_symbol] if jackpot_hit else [miss_symbol, miss_symbol, miss_symbol]
+
+    if jackpot_hit:
+        winnings = pot_amount
+        final_balance = add_balance(interaction.user.id, winnings)
+        reset_slots_pot()
+        final_embed = build_slots_embed(
+            guild,
+            title="Casino | Jackpot !",
+            symbols=final_symbols,
+            description=(
+                f"{interaction.user.mention} a touché le jackpot !\n"
+                f"Tu remportes **{winnings} Sukushi Dollars**.\n"
+                f"Ton nouveau solde : **{final_balance} Sukushi Dollars**."
+            ),
+            color=discord.Color.gold(),
+            pot_amount=0,
+        )
+    else:
+        final_embed = build_slots_embed(
+            guild,
+            title="Casino | Raté",
+            symbols=final_symbols,
+            description=(
+                f"{interaction.user.mention} n'a rien gagné cette fois.\n"
+                f"Le pot continue de monter à **{pot_amount} Sukushi Dollars**.\n"
+                f"Ton solde actuel : **{new_balance} Sukushi Dollars**."
+            ),
+            color=discord.Color.red(),
+            pot_amount=pot_amount,
+        )
+
+    await interaction.edit_original_response(embed=final_embed)
+
+
 async def ensure_panel_access(interaction: discord.Interaction) -> bool:
     if not await ensure_not_in_prison(interaction):
         return False
@@ -3606,6 +3700,12 @@ class PanelView(OwnerRestrictedView):
         if not await ensure_panel_access(interaction):
             return
         await interaction.response.send_modal(BlackjackBetModal())
+
+    @discord.ui.button(label="Slots", style=discord.ButtonStyle.primary, row=1)
+    async def slots_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await run_slots_action(interaction)
 
     @discord.ui.button(label="Payer", style=discord.ButtonStyle.primary, row=1)
     async def pay_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
@@ -3974,6 +4074,13 @@ async def blackjack(
 
     view = BlackjackView(interaction.user, mise)
     await view.start_game(interaction)
+
+
+@bot.tree.command(name="slots", description="Lance les slots pour 100 Sukushi Dollars.")
+@prison_block()
+@economy_block()
+async def slots(interaction: discord.Interaction) -> None:
+    await run_slots_action(interaction)
 
 
 @bot.tree.command(name="mute", description="Timeout a member for a set duration.")
