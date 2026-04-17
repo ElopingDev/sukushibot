@@ -22,6 +22,7 @@ from economy import (
     get_job,
     get_pair_cooldown_remaining,
     get_prison_record,
+    get_economy_stats,
     get_slots_pot,
     get_top_balances,
     imprison_user,
@@ -37,6 +38,7 @@ from economy import (
     reset_all_balances,
     reset_slots_pot,
     reset_cooldown_files,
+    record_economy_stat,
     save_economy,
     save_economy_meta,
     save_event_state,
@@ -167,6 +169,27 @@ JOB_ACTIONS = {
             {"label": "Grosse fraude à la carte", "reward": 1700, "catch_chance": 0.55},
         ],
     },
+}
+ECONOMY_STAT_LABELS = {
+    "daily": "Daily",
+    "work_success": "Travail réussi",
+    "work_caught": "Travail attrapé",
+    "attack_steal": "Attaque",
+    "blackjack_win": "Blackjack gain",
+    "blackjack_loss": "Blackjack perte",
+    "slots_jackpot": "Slots jackpot",
+    "slots_spin": "Slots mise",
+    "mines_cashout": "Mines cashout",
+    "mines_loss": "Mines perte",
+    "lottery_entry": "Loterie entrée",
+    "lottery_win": "Loterie gain",
+    "event_win": "Événement",
+    "level_up": "Niveau",
+    "prison_fail": "Prison échec",
+    "prison_cheat": "Prison triche",
+    "prison_tax": "Prison taxe",
+    "staff_give": "Staff give",
+    "staff_take": "Staff take",
 }
 ATTACK_STARTING_HP = 100
 ATTACK_PLAYER_HIT_CHANCE = 0.78
@@ -361,6 +384,10 @@ def get_custom_emoji_text(
 ) -> str:
     emoji = find_custom_emoji(guild, name)
     return str(emoji) if emoji else fallback
+
+
+def get_economy_stat_label(source: str) -> str:
+    return ECONOMY_STAT_LABELS.get(source, source.replace("_", " ").title())
 
 
 def get_role_by_id(guild: discord.Guild | None, role_id: int) -> discord.Role | None:
@@ -930,6 +957,7 @@ class AttackView(discord.ui.View):
             if amount > 0:
                 set_balance_value(self.target.id, target_balance - amount)
                 new_attacker_balance = add_balance(self.attacker.id, amount)
+                record_economy_stat("attack_steal", amount)
                 result = (
                     f"Tu as gagné le combat et volé **{amount} Sukushi Dollars** à {self.target.mention}.\n"
                     f"Nouveau solde : **{new_attacker_balance} Sukushi Dollars**."
@@ -941,6 +969,7 @@ class AttackView(discord.ui.View):
             if amount > 0:
                 set_balance_value(self.attacker.id, attacker_balance - amount)
                 new_target_balance = add_balance(self.target.id, amount)
+                record_economy_stat("attack_steal", amount)
                 result = (
                     f"Tu as perdu le combat. **{amount} Sukushi Dollars** ont été récupérés par {self.target.mention}.\n"
                     f"Nouveau solde de la cible : **{new_target_balance} Sukushi Dollars**."
@@ -1094,12 +1123,14 @@ class BlackjackView(discord.ui.View):
         elif player_blackjack:
             gain = int(self.bet * 1.5)
             new_balance = add_balance(self.player.id, gain)
+            record_economy_stat("blackjack_win", gain)
             result = (
                 f"Blackjack naturel. Tu gagnes **{gain}**.\n"
                 f"Nouveau solde : **{new_balance} Sukushi Dollars**."
             )
         else:
             new_balance = add_balance(self.player.id, -self.bet)
+            record_economy_stat("blackjack_loss", -self.bet)
             result = (
                 f"Le dealer a un blackjack naturel. Tu perds **{self.bet}**.\n"
                 f"Nouveau solde : **{new_balance} Sukushi Dollars**."
@@ -1124,12 +1155,15 @@ class BlackjackView(discord.ui.View):
 
         if player_total > 21:
             new_balance = add_balance(self.player.id, -self.bet)
+            record_economy_stat("blackjack_loss", -self.bet)
             result = f"Tu dépasses 21. Tu perds **{self.bet}**.\nNouveau solde : **{new_balance} Sukushi Dollars**."
         elif dealer_total > 21 or player_total > dealer_total:
             new_balance = add_balance(self.player.id, self.bet)
+            record_economy_stat("blackjack_win", self.bet)
             result = f"Tu gagnes **{self.bet}**.\nNouveau solde : **{new_balance} Sukushi Dollars**."
         elif player_total < dealer_total:
             new_balance = add_balance(self.player.id, -self.bet)
+            record_economy_stat("blackjack_loss", -self.bet)
             result = f"Le dealer gagne. Tu perds **{self.bet}**.\nNouveau solde : **{new_balance} Sukushi Dollars**."
         else:
             result = (
@@ -1302,6 +1336,7 @@ class MinesView(discord.ui.View):
     async def finish_loss(self, interaction: discord.Interaction, *, triggered_bomb: int) -> None:
         self.finished = True
         self.reveal_board(triggered_bomb=triggered_bomb)
+        record_economy_stat("mines_loss", -self.bet)
         ACTIVE_MINES_USERS.discard(self.player.id)
         await interaction.response.edit_message(
             embed=build_mines_embed(
@@ -1328,6 +1363,7 @@ class MinesView(discord.ui.View):
         self.reveal_board()
         winnings = self.get_cashout_amount()
         new_balance = add_balance(self.player.id, winnings)
+        record_economy_stat("mines_cashout", winnings)
         ACTIVE_MINES_USERS.discard(self.player.id)
         description = (
             f"{self.player.mention} encaisse **{winnings} Sukushi Dollars**.\n"
@@ -1568,6 +1604,7 @@ class WorkMinigameView(discord.ui.View):
             if random.random() < catch_chance:
                 prison_reward = reward // 2
                 new_balance = add_balance(interaction.user.id, prison_reward)
+                record_economy_stat("work_caught", prison_reward)
                 if isinstance(interaction.user, discord.Member) and isinstance(interaction.client, SukushiBot):
                     await interaction.client.send_member_to_prison(
                         interaction.user,
@@ -1581,6 +1618,7 @@ class WorkMinigameView(discord.ui.View):
                 )
             else:
                 new_balance = add_balance(interaction.user.id, reward)
+                record_economy_stat("work_success", reward)
                 result = (
                     f"Tu as choisi **{action_label}**.\n"
                     f"Mission réussie. Tu gagnes **{reward} Sukushi Dollars**.\n"
@@ -1808,6 +1846,7 @@ class LotteryView(discord.ui.View):
             return
 
         set_balance_value(interaction.user.id, balance_value - LOTTERY_ENTRY_COST)
+        record_economy_stat("lottery_entry", -LOTTERY_ENTRY_COST)
         participants.append(interaction.user.id)
         state["participants"] = participants
         save_lottery_state(state)
@@ -2121,6 +2160,7 @@ class SukushiBot(discord.Client):
             )
             new_balance = set_balance_value(member.id, current_balance - tax_amount)
             del new_balance
+            record_economy_stat("prison_tax", -tax_amount)
 
         imprison_user(member.id, reason=reason)
         set_prison_record(
@@ -2247,6 +2287,7 @@ class SukushiBot(discord.Client):
             current_balance = ensure_minimum_balance(message.author.id)
             penalty_amount = compute_percentage_penalty(current_balance, JAIL_FAILURE_PERCENT)
             new_balance = set_balance_value(message.author.id, current_balance - penalty_amount)
+            record_economy_stat("prison_fail", -penalty_amount)
             await message.channel.send(
                 (
                     f"{message.author.mention} code incorrect.\n"
@@ -2274,6 +2315,7 @@ class SukushiBot(discord.Client):
         if elapsed < JAIL_MIN_SOLVE_SECONDS:
             current_balance = ensure_minimum_balance(message.author.id)
             new_balance = set_balance_value(message.author.id, current_balance // 2)
+            record_economy_stat("prison_cheat", -(current_balance - new_balance))
             await message.channel.send(
                 (
                     f"{message.author.mention} triche détectée : copier-coller suspect.\n"
@@ -2458,6 +2500,7 @@ class SukushiBot(discord.Client):
             return False
 
         reward_total = add_balance(winner.id, EVENT_GUESS_REWARD)
+        record_economy_stat("event_win", EVENT_GUESS_REWARD)
         save_event_state({})
 
         channel = await self.get_event_channel()
@@ -2752,6 +2795,7 @@ class SukushiBot(discord.Client):
         if participants:
             winner_id = random.choice(participants)
             new_balance = add_balance(winner_id, LOTTERY_PRIZE)
+            record_economy_stat("lottery_win", LOTTERY_PRIZE)
             await channel.send(
                 (
                     f"La loterie est terminée. Bravo <@{winner_id}> !\n"
@@ -2881,6 +2925,7 @@ class SukushiBot(discord.Client):
 
         reward_total = LEVEL_REWARD * levels_gained
         new_balance = add_balance(message.author.id, reward_total)
+        record_economy_stat("level_up", reward_total)
         channel = self.get_channel(LEVELUP_CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
             return
@@ -3127,6 +3172,7 @@ async def run_daily_action(interaction: discord.Interaction) -> None:
 
     update_cooldown(DAILY_FILE, interaction.user.id)
     new_balance = add_balance(interaction.user.id, DAILY_REWARD)
+    record_economy_stat("daily", DAILY_REWARD)
     embed = make_embed(
         "Daily récupéré",
         (
@@ -3781,6 +3827,7 @@ async def run_slots_action(interaction: discord.Interaction) -> None:
     update_cooldown(SLOTS_COOLDOWN_FILE, interaction.user.id)
     new_balance = set_balance_value(interaction.user.id, balance_value - SLOTS_COST)
     pot_amount = add_slots_pot(SLOTS_COST)
+    record_economy_stat("slots_spin", -SLOTS_COST)
 
     await interaction.response.defer(thinking=True)
 
@@ -3818,6 +3865,7 @@ async def run_slots_action(interaction: discord.Interaction) -> None:
     if jackpot_hit:
         winnings = pot_amount
         final_balance = add_balance(interaction.user.id, winnings)
+        record_economy_stat("slots_jackpot", winnings)
         reset_pot_amount = reset_slots_pot()
         final_embed = build_slots_embed(
             guild,
@@ -4437,7 +4485,7 @@ async def slots(interaction: discord.Interaction) -> None:
 @economy_block()
 async def mines(
     interaction: discord.Interaction,
-    mise: app_commands.Range[int, 1, 1_000_000],
+    mise: app_commands.Range[int, 100, 1_000_000],
     bombes: app_commands.Range[int, 4, 5],
 ) -> None:
     await run_mines_action(interaction, mise, bombes)
@@ -4812,6 +4860,65 @@ async def clearevent(interaction: discord.Interaction) -> None:
     )
 
 
+@bot.tree.command(name="economystats", description="Affiche les statistiques globales de l'économie.")
+@prison_block(allow_staff_bypass=True)
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.checks.has_permissions(manage_guild=True)
+async def economystats(interaction: discord.Interaction) -> None:
+    stats = get_economy_stats()
+    if not stats:
+        await interaction.response.send_message(
+            "Aucune statistique économique n'a encore été enregistrée.",
+            ephemeral=True,
+        )
+        return
+
+    gain_sorted = sorted(stats.items(), key=lambda item: item[1].get("gained", 0), reverse=True)
+    loss_sorted = sorted(stats.items(), key=lambda item: item[1].get("lost", 0), reverse=True)
+    net_sorted = sorted(
+        stats.items(),
+        key=lambda item: item[1].get("gained", 0) - item[1].get("lost", 0),
+        reverse=True,
+    )
+
+    def format_stat_lines(items: list[tuple[str, dict[str, int]]], *, mode: str) -> str:
+        lines: list[str] = []
+        for source, values in items[:5]:
+            gained = int(values.get("gained", 0))
+            lost = int(values.get("lost", 0))
+            gain_events = int(values.get("gain_events", 0))
+            loss_events = int(values.get("loss_events", 0))
+            label = get_economy_stat_label(source)
+            if mode == "gain":
+                lines.append(f"**{label}** - +{gained} SD ({gain_events} gains)")
+            elif mode == "loss":
+                lines.append(f"**{label}** - -{lost} SD ({loss_events} pertes)")
+            else:
+                net = gained - lost
+                sign = "+" if net >= 0 else ""
+                lines.append(f"**{label}** - {sign}{net} SD")
+        return "\n".join(lines) if lines else "Aucune donnée."
+
+    total_gained = sum(int(values.get("gained", 0)) for values in stats.values())
+    total_lost = sum(int(values.get("lost", 0)) for values in stats.values())
+    total_net = total_gained - total_lost
+
+    embed = make_embed(
+        "Statistiques Économie",
+        (
+            f"Argent gagné total : **{total_gained} SD**\n"
+            f"Argent perdu total : **{total_lost} SD**\n"
+            f"Net global : **{total_net:+} SD**"
+        ),
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Économie stats",
+    )
+    embed.add_field(name="Top gains", value=format_stat_lines(gain_sorted, mode="gain"), inline=False)
+    embed.add_field(name="Top pertes", value=format_stat_lines(loss_sorted, mode="loss"), inline=False)
+    embed.add_field(name="Top net", value=format_stat_lines(net_sorted, mode="net"), inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
 @bot.tree.command(name="lotterypanel", description="Envoie le panneau de la loterie.")
 @prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(manage_messages=True)
@@ -4966,6 +5073,7 @@ async def staffgive(
 
     ensure_minimum_balance(member.id)
     new_balance = add_balance(member.id, montant)
+    record_economy_stat("staff_give", montant)
     await interaction.response.send_message(
         (
             f"**{montant} Sukushi Dollars** ont été ajoutés à {member.mention}.\n"
@@ -4993,6 +5101,7 @@ async def stafftake(
     current_balance = get_balance_value(member.id)
     removed_amount = min(current_balance, montant)
     new_balance = set_balance_value(member.id, current_balance - removed_amount)
+    record_economy_stat("staff_take", -removed_amount)
     await interaction.response.send_message(
         (
             f"**{removed_amount} Sukushi Dollars** ont été retirés à {member.mention}.\n"

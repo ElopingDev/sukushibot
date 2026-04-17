@@ -14,6 +14,7 @@ LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
 EVENT_FILE = Path("event.json")
 SLOTS_FILE = Path("slots.json")
+ECONOMY_STATS_FILE = Path("economy_stats.json")
 DEFAULT_SLOTS_POT = 0
 
 
@@ -227,6 +228,59 @@ def add_slots_pot(amount: int) -> int:
 def reset_slots_pot() -> int:
     save_slots_state({"pot": DEFAULT_SLOTS_POT})
     return DEFAULT_SLOTS_POT
+
+
+def load_economy_stats() -> dict[str, dict[str, int]]:
+    if not ECONOMY_STATS_FILE.exists():
+        return {}
+
+    with ECONOMY_STATS_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    if not isinstance(data, dict):
+        return {}
+
+    normalized: dict[str, dict[str, int]] = {}
+    for source, raw_entry in data.items():
+        if not isinstance(raw_entry, dict):
+            continue
+        entry: dict[str, int] = {}
+        for field in ("gained", "lost", "gain_events", "loss_events"):
+            try:
+                entry[field] = max(0, int(raw_entry.get(field, 0)))
+            except (TypeError, ValueError):
+                entry[field] = 0
+        normalized[str(source)] = entry
+    return normalized
+
+
+def save_economy_stats(data: dict[str, dict[str, int]]) -> None:
+    with ECONOMY_STATS_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
+
+
+def record_economy_stat(source: str, amount: int) -> None:
+    if amount == 0:
+        return
+
+    data = load_economy_stats()
+    entry = data.setdefault(
+        str(source),
+        {"gained": 0, "lost": 0, "gain_events": 0, "loss_events": 0},
+    )
+
+    if amount > 0:
+        entry["gained"] += int(amount)
+        entry["gain_events"] += 1
+    else:
+        entry["lost"] += abs(int(amount))
+        entry["loss_events"] += 1
+
+    save_economy_stats(data)
+
+
+def get_economy_stats() -> dict[str, dict[str, int]]:
+    return load_economy_stats()
 
 
 def reset_cooldown_files() -> None:
