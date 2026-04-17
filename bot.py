@@ -1568,6 +1568,7 @@ class SukushiBot(discord.Client):
         self.tempban_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
         self.lottery_task: asyncio.Task[None] | None = None
         self.random_event_task: asyncio.Task[None] | None = None
+        self.random_event_bootstrap_task: asyncio.Task[None] | None = None
         self.next_auto_event_at: datetime | None = None
         self.restored_tempbans = False
 
@@ -1584,7 +1585,7 @@ class SukushiBot(discord.Client):
     async def on_ready(self) -> None:
         if self.user is None:
             return
-        print(f"Logged in as {self.user} (ID: {self.user.id})")
+        print(f"Logged in as {self.user} (ID: {self.user.id})", flush=True)
         if not self.restored_tempbans:
             await self.restore_tempbans()
             self.restored_tempbans = True
@@ -1596,14 +1597,23 @@ class SukushiBot(discord.Client):
             self.next_auto_event_at = now + EVENT_INTERVAL
         if self.random_event_task is None or self.random_event_task.done():
             self.random_event_task = asyncio.create_task(self.run_random_event_loop())
-        if self.get_active_event_state() is None:
-            success, message = await self.start_random_event()
-            if success:
-                self.next_auto_event_at = datetime.now(timezone.utc) + EVENT_INTERVAL
-                print("Initial random event launched on startup.")
-            else:
-                print(f"Initial random event not launched: {message}")
-        print("Slash commands are synced and ready.")
+        if self.random_event_bootstrap_task is None or self.random_event_bootstrap_task.done():
+            self.random_event_bootstrap_task = asyncio.create_task(self.bootstrap_random_events())
+        print("Slash commands are synced and ready.", flush=True)
+
+    async def bootstrap_random_events(self) -> None:
+        await self.wait_until_ready()
+        await asyncio.sleep(5)
+        if self.get_active_event_state() is not None:
+            print("Initial random event skipped: active event already exists.", flush=True)
+            return
+
+        success, message = await self.start_random_event()
+        if success:
+            self.next_auto_event_at = datetime.now(timezone.utc) + EVENT_INTERVAL
+            print("Initial random event launched on startup.", flush=True)
+        else:
+            print(f"Initial random event not launched: {message}", flush=True)
 
     async def seed_existing_member_balances(self) -> None:
         meta = load_economy_meta()
@@ -2334,12 +2344,14 @@ class SukushiBot(discord.Client):
                     success, message = await self.start_random_event()
                     if success:
                         self.next_auto_event_at = now + EVENT_INTERVAL
+                        print(f"Automatic random event launched: {message}", flush=True)
                     else:
                         active_state = self.get_active_event_state()
                         if active_state is None:
                             self.next_auto_event_at = now + timedelta(minutes=1)
+                        print(f"Automatic random event not launched: {message}", flush=True)
                 except Exception as error:
-                    print(f"Random event loop error: {error}")
+                    print(f"Random event loop error: {error}", flush=True)
         except asyncio.CancelledError:
             return
 
