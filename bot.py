@@ -4039,7 +4039,7 @@ class PanelView(OwnerRestrictedView):
         if not await ensure_panel_access(interaction):
             return
         await interaction.response.send_message(
-            "Utilise `/mines mise:<montant> bombes:<1-5>` pour lancer une partie de mines.",
+            "Utilise `/mines mise:<montant> bombes:<3-5>` pour lancer une partie de mines.",
             ephemeral=True,
         )
 
@@ -4425,7 +4425,7 @@ async def slots(interaction: discord.Interaction) -> None:
 async def mines(
     interaction: discord.Interaction,
     mise: app_commands.Range[int, 1, 1_000_000],
-    bombes: app_commands.Range[int, 1, 5],
+    bombes: app_commands.Range[int, 3, 5],
 ) -> None:
     await run_mines_action(interaction, mise, bombes)
 
