@@ -1591,10 +1591,18 @@ class SukushiBot(discord.Client):
         await self.seed_existing_member_balances()
         await self.restore_prison_challenges()
         await self.restore_lottery()
+        now = datetime.now(timezone.utc)
         if self.next_auto_event_at is None:
-            self.next_auto_event_at = datetime.now(timezone.utc)
+            self.next_auto_event_at = now + EVENT_INTERVAL
         if self.random_event_task is None or self.random_event_task.done():
             self.random_event_task = asyncio.create_task(self.run_random_event_loop())
+        if self.get_active_event_state() is None:
+            success, message = await self.start_random_event()
+            if success:
+                self.next_auto_event_at = datetime.now(timezone.utc) + EVENT_INTERVAL
+                print("Initial random event launched on startup.")
+            else:
+                print(f"Initial random event not launched: {message}")
         print("Slash commands are synced and ready.")
 
     async def seed_existing_member_balances(self) -> None:
@@ -1999,7 +2007,13 @@ class SukushiBot(discord.Client):
 
     async def get_event_channel(self) -> discord.TextChannel | None:
         channel = self.get_channel(EVENT_CHANNEL_ID)
-        return channel if isinstance(channel, discord.TextChannel) else None
+        if isinstance(channel, discord.TextChannel):
+            return channel
+        try:
+            fetched_channel = await self.fetch_channel(EVENT_CHANNEL_ID)
+        except discord.HTTPException:
+            return None
+        return fetched_channel if isinstance(fetched_channel, discord.TextChannel) else None
 
     def get_active_event_state(self) -> dict[str, object] | None:
         state = load_event_state()
