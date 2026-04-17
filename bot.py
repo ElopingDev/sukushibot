@@ -131,6 +131,8 @@ EVENT_INTERVAL = timedelta(minutes=30)
 SLOTS_COST = 100
 SLOTS_JACKPOT_CHANCE = 0.03
 SLOTS_COOLDOWN = timedelta(minutes=1)
+FACTION_CREATE_COST = 3000
+FACTION_CHANNEL_CATEGORY_ID = 1494843127662641172
 MINES_GRID_SIZE = 4
 MINES_TOTAL_TILES = MINES_GRID_SIZE * MINES_GRID_SIZE
 MINES_HOUSE_EDGE = 0.68
@@ -198,6 +200,7 @@ ECONOMY_STAT_LABELS = {
     "prison_tax": "Prison taxe",
     "staff_give": "Staff give",
     "staff_take": "Staff take",
+    "faction_create": "Création de faction",
 }
 FACTION_TAG_PATTERN = re.compile(r"^[A-Za-z0-9]{1,4}$")
 ATTACK_STARTING_HP = 100
@@ -415,6 +418,20 @@ def get_faction_member_count(faction: dict[str, object]) -> int:
     return len(members) if isinstance(members, dict) else 0
 
 
+def get_faction_member_ids(faction: dict[str, object]) -> set[int]:
+    members = faction.get("members", {})
+    if not isinstance(members, dict):
+        return set()
+
+    member_ids: set[int] = set()
+    for member_id in members.keys():
+        try:
+            member_ids.add(int(member_id))
+        except (TypeError, ValueError):
+            continue
+    return member_ids
+
+
 def get_faction_allies(faction: dict[str, object]) -> set[str]:
     raw_allies = faction.get("allies", [])
     if not isinstance(raw_allies, list):
@@ -438,6 +455,122 @@ def factions_are_allied(owner_a: int, owner_b: int) -> bool:
     if faction_a is None or faction_b is None:
         return False
     return str(owner_b) in get_faction_allies(faction_a) and str(owner_a) in get_faction_allies(faction_b)
+
+
+async def get_text_channel_by_id(
+    guild: discord.Guild,
+    channel_id: int | None,
+) -> discord.TextChannel | None:
+    if channel_id is None:
+        return None
+
+    channel = guild.get_channel(channel_id)
+    if isinstance(channel, discord.TextChannel):
+        return channel
+
+    try:
+        fetched_channel = await guild.fetch_channel(channel_id)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return None
+    return fetched_channel if isinstance(fetched_channel, discord.TextChannel) else None
+
+
+def build_member_only_overwrites(
+    guild: discord.Guild,
+    member_ids: set[int],
+) -> dict[discord.abc.Snowflake, discord.PermissionOverwrite]:
+    overwrites: dict[discord.abc.Snowflake, discord.PermissionOverwrite] = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+    }
+    me = guild.me
+    if me is not None:
+        overwrites[me] = discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            manage_channels=True,
+            manage_messages=True,
+            attach_files=True,
+            embed_links=True,
+        )
+
+    for member_id in member_ids:
+        member = guild.get_member(member_id)
+        if member is None:
+            continue
+        overwrites[member] = discord.PermissionOverwrite(
+            view_channel=True,
+            send_messages=True,
+            read_message_history=True,
+            attach_files=True,
+            embed_links=True,
+        )
+    return overwrites
+
+
+async def sync_faction_channel_permissions(
+    guild: discord.Guild,
+    owner_id: int,
+) -> None:
+    faction = get_faction_by_owner(owner_id)
+    if faction is None:
+        return
+
+    channel = await get_text_channel_by_id(guild, faction.get("channel_id"))
+    if channel is None:
+        return
+
+    await channel.edit(
+        overwrites=build_member_only_overwrites(guild, get_faction_member_ids(faction)),
+        reason="Synchronisation du salon de faction",
+    )
+
+
+async def sync_ally_channel_permissions(
+    guild: discord.Guild,
+    owner_id: int,
+    ally_owner_id: int,
+) -> None:
+    faction = get_faction_by_owner(owner_id)
+    ally_faction = get_faction_by_owner(ally_owner_id)
+    if faction is None or ally_faction is None:
+        return
+
+    raw_ally_channels = faction.get("ally_channels", {})
+    if not isinstance(raw_ally_channels, dict):
+        return
+
+    try:
+        channel_id = int(raw_ally_channels.get(str(ally_owner_id)))
+    except (TypeError, ValueError):
+        return
+
+    channel = await get_text_channel_by_id(guild, channel_id)
+    if channel is None:
+        return
+
+    member_ids = get_faction_member_ids(faction) | get_faction_member_ids(ally_faction)
+    await channel.edit(
+        overwrites=build_member_only_overwrites(guild, member_ids),
+        reason="Synchronisation du salon d'alliance",
+    )
+
+
+async def sync_member_faction_access(
+    guild: discord.Guild,
+    owner_id: int,
+) -> None:
+    faction = get_faction_by_owner(owner_id)
+    if faction is None:
+        return
+
+    await sync_faction_channel_permissions(guild, owner_id)
+    for ally_owner_id in get_faction_allies(faction):
+        try:
+            parsed_ally_owner_id = int(ally_owner_id)
+        except ValueError:
+            continue
+        await sync_ally_channel_permissions(guild, owner_id, parsed_ally_owner_id)
 
 
 async def sync_member_faction_nickname(
@@ -4593,6 +4726,13 @@ async def createfaction(
         )
         return
 
+    balance_value = get_balance_value(interaction.user.id)
+    if balance_value < FACTION_CREATE_COST:
+        await interaction.response.send_message(
+            f"Il te faut **{FACTION_CREATE_COST} Sukushi Dollars** pour créer une faction.",
+        )
+        return
+
     faction_name = nom.strip()
     if not faction_name:
         await interaction.response.send_message(
@@ -4619,6 +4759,8 @@ async def createfaction(
         "tag": "",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "allies": [],
+        "channel_id": None,
+        "ally_channels": {},
         "members": {
             str(interaction.user.id): {
                 "joined_at": datetime.now(timezone.utc).isoformat(),
@@ -4626,13 +4768,170 @@ async def createfaction(
             }
         },
     }
+    new_balance = set_balance_value(interaction.user.id, balance_value - FACTION_CREATE_COST)
+    record_economy_stat("faction_create", -FACTION_CREATE_COST)
     save_faction_state(state)
 
     await interaction.response.send_message(
         (
-            f"Ta faction **{faction_name}** a été créée.\n"
+            f"Ta faction **{faction_name}** a été créée pour **{FACTION_CREATE_COST} Sukushi Dollars**.\n"
+            f"Nouveau solde : **{new_balance} Sukushi Dollars**.\n"
             "Utilise `/setfactiontag` pour définir un tag, puis `/invitefaction` pour recruter."
         ),
+    )
+
+
+@bot.tree.command(name="createfactionchannel", description="Crée le salon privé de ta faction.")
+async def createfactionchannel(interaction: discord.Interaction) -> None:
+    if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+        )
+        return
+
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        await interaction.response.send_message(
+            "Impossible de gérer les factions pour le moment.",
+        )
+        return
+
+    faction = factions.get(str(interaction.user.id))
+    if not isinstance(faction, dict):
+        await interaction.response.send_message(
+            "Tu dois être chef d'une faction pour créer ce salon.",
+        )
+        return
+
+    existing_channel = await get_text_channel_by_id(interaction.guild, faction.get("channel_id"))
+    if existing_channel is not None:
+        await interaction.response.send_message(
+            f"Ta faction a déjà un salon : {existing_channel.mention}.",
+        )
+        return
+
+    category = interaction.guild.get_channel(FACTION_CHANNEL_CATEGORY_ID)
+    if not isinstance(category, discord.CategoryChannel):
+        await interaction.response.send_message(
+            "La catégorie des salons de faction est introuvable.",
+        )
+        return
+
+    channel_name_source = str(faction.get("tag") or faction.get("name") or "faction")
+    channel_name = f"faction-{sanitize_ticket_name(channel_name_source)}"[:100]
+    channel = await interaction.guild.create_text_channel(
+        name=channel_name,
+        category=category,
+        overwrites=build_member_only_overwrites(interaction.guild, get_faction_member_ids(faction)),
+        reason=f"Salon de faction créé par {interaction.user}",
+    )
+
+    faction["channel_id"] = channel.id
+    save_faction_state(state)
+    await interaction.response.send_message(
+        f"Le salon privé de ta faction a été créé : {channel.mention}.",
+    )
+
+
+@bot.tree.command(name="createallychannel", description="Crée un salon partagé avec une faction alliée.")
+async def createallychannel(
+    interaction: discord.Interaction,
+    tag: str,
+) -> None:
+    if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+        )
+        return
+
+    target_info = get_faction_by_tag(tag)
+    if target_info is None:
+        await interaction.response.send_message(
+            "Aucune faction ne correspond à ce tag.",
+        )
+        return
+
+    target_owner_id, target_faction = target_info
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        await interaction.response.send_message(
+            "Impossible de gérer les factions pour le moment.",
+        )
+        return
+
+    own_faction = factions.get(str(interaction.user.id))
+    if not isinstance(own_faction, dict):
+        await interaction.response.send_message(
+            "Tu dois être chef d'une faction pour créer ce salon.",
+        )
+        return
+
+    if target_owner_id == interaction.user.id:
+        await interaction.response.send_message(
+            "Tu ne peux pas créer un salon d'alliance avec ta propre faction.",
+        )
+        return
+
+    if not factions_are_allied(interaction.user.id, target_owner_id):
+        await interaction.response.send_message(
+            "Tu peux seulement créer un salon avec une faction alliée.",
+        )
+        return
+
+    own_ally_channels = own_faction.get("ally_channels", {})
+    if not isinstance(own_ally_channels, dict):
+        own_ally_channels = {}
+        own_faction["ally_channels"] = own_ally_channels
+
+    existing_channel = await get_text_channel_by_id(interaction.guild, own_ally_channels.get(str(target_owner_id)))
+    if existing_channel is not None:
+        await interaction.response.send_message(
+            f"Un salon d'alliance existe déjà : {existing_channel.mention}.",
+        )
+        return
+
+    category = interaction.guild.get_channel(FACTION_CHANNEL_CATEGORY_ID)
+    if not isinstance(category, discord.CategoryChannel):
+        await interaction.response.send_message(
+            "La catégorie des salons de faction est introuvable.",
+        )
+        return
+
+    name_parts = sorted(
+        [
+            sanitize_ticket_name(str(own_faction.get("tag") or own_faction.get("name") or interaction.user.id)),
+            sanitize_ticket_name(str(target_faction.get("tag") or target_faction.get("name") or target_owner_id)),
+        ]
+    )
+    channel_name = f"ally-{'-'.join(name_parts)}"[:100]
+    member_ids = get_faction_member_ids(own_faction) | get_faction_member_ids(target_faction)
+    channel = await interaction.guild.create_text_channel(
+        name=channel_name,
+        category=category,
+        overwrites=build_member_only_overwrites(interaction.guild, member_ids),
+        reason=f"Salon d'alliance créé par {interaction.user}",
+    )
+
+    target_entry = factions.get(str(target_owner_id))
+    if not isinstance(target_entry, dict):
+        await channel.delete(reason="Nettoyage d'un salon d'alliance orphelin")
+        await interaction.response.send_message(
+            "La faction alliée est introuvable.",
+        )
+        return
+
+    target_ally_channels = target_entry.get("ally_channels", {})
+    if not isinstance(target_ally_channels, dict):
+        target_ally_channels = {}
+        target_entry["ally_channels"] = target_ally_channels
+
+    own_ally_channels[str(target_owner_id)] = channel.id
+    target_ally_channels[str(interaction.user.id)] = channel.id
+    save_faction_state(state)
+    await interaction.response.send_message(
+        f"Le salon d'alliance a été créé : {channel.mention}.",
     )
 
 
@@ -4821,6 +5120,7 @@ async def joinfaction(interaction: discord.Interaction) -> None:
     }
     invites.pop(str(interaction.user.id), None)
     save_faction_state(state)
+    await sync_member_faction_access(interaction.guild, owner_id)
 
     faction_tag = str(faction.get("tag") or "")
     nickname_note = ""
@@ -4883,6 +5183,8 @@ async def leavefaction(interaction: discord.Interaction) -> None:
 
     member_data = members.pop(str(interaction.user.id), None)
     save_faction_state(state)
+    if interaction.guild is not None:
+        await sync_member_faction_access(interaction.guild, owner_id)
 
     old_tag = str(faction_entry.get("tag") or "")
     base_nick = member_data.get("base_nick") if isinstance(member_data, dict) else None
@@ -4952,6 +5254,8 @@ async def kickfaction(
 
     member_data = members.pop(str(membre.id), None)
     save_faction_state(state)
+    if interaction.guild is not None:
+        await sync_member_faction_access(interaction.guild, interaction.user.id)
 
     old_tag = str(faction_entry.get("tag") or "")
     base_nick = member_data.get("base_nick") if isinstance(member_data, dict) else None
@@ -4997,6 +5301,10 @@ async def disbandfaction(interaction: discord.Interaction) -> None:
     if not isinstance(members, dict):
         members = {}
     allies = get_faction_allies(faction)
+    faction_channel_id = faction.get("channel_id")
+    ally_channels = faction.get("ally_channels", {})
+    if not isinstance(ally_channels, dict):
+        ally_channels = {}
 
     for target_id, invited_owner_id in list(invites.items()):
         if invited_owner_id == str(interaction.user.id):
@@ -5015,8 +5323,35 @@ async def disbandfaction(interaction: discord.Interaction) -> None:
             other_allies = other_faction.get("allies", [])
             if isinstance(other_allies, list):
                 other_faction["allies"] = [ally_id for ally_id in other_allies if ally_id != str(interaction.user.id)]
+            other_ally_channels = other_faction.get("ally_channels", {})
+            if isinstance(other_ally_channels, dict):
+                other_ally_channels.pop(str(interaction.user.id), None)
 
     save_faction_state(state)
+
+    faction_channel = await get_text_channel_by_id(interaction.guild, faction_channel_id)
+    if faction_channel is not None:
+        try:
+            await faction_channel.delete(reason=f"Faction dissoute par {interaction.user}")
+        except discord.HTTPException:
+            pass
+
+    deleted_ally_channel_ids: set[int] = set()
+    for channel_id in ally_channels.values():
+        try:
+            parsed_channel_id = int(channel_id)
+        except (TypeError, ValueError):
+            continue
+        if parsed_channel_id in deleted_ally_channel_ids:
+            continue
+        deleted_ally_channel_ids.add(parsed_channel_id)
+        ally_channel = await get_text_channel_by_id(interaction.guild, parsed_channel_id)
+        if ally_channel is None:
+            continue
+        try:
+            await ally_channel.delete(reason=f"Alliance supprimée après dissolution de la faction {interaction.user}")
+        except discord.HTTPException:
+            continue
 
     restored = 0
     failed = 0
@@ -5154,6 +5489,8 @@ async def ally(
         if str(interaction.user.id) not in target_allies:
             target_allies.append(str(interaction.user.id))
         save_faction_state(state)
+        await sync_member_faction_access(interaction.guild, interaction.user.id)
+        await sync_member_faction_access(interaction.guild, target_owner_id)
         await interaction.response.send_message(
             (
                 f"Alliance confirmée entre **{own_entry.get('name') or 'ta faction'}** "
@@ -5249,6 +5586,18 @@ async def disbandally(
     own_entry["allies"] = [ally_id for ally_id in own_allies if ally_id != str(target_owner_id)]
     target_entry["allies"] = [ally_id for ally_id in target_allies if ally_id != str(interaction.user.id)]
 
+    own_ally_channels = own_entry.get("ally_channels", {})
+    target_ally_channels = target_entry.get("ally_channels", {})
+    ally_channel_id: int | None = None
+    if isinstance(own_ally_channels, dict):
+        raw_channel_id = own_ally_channels.pop(str(target_owner_id), None)
+        try:
+            ally_channel_id = int(raw_channel_id) if raw_channel_id is not None else None
+        except (TypeError, ValueError):
+            ally_channel_id = None
+    if isinstance(target_ally_channels, dict):
+        target_ally_channels.pop(str(interaction.user.id), None)
+
     incoming = ally_requests.get(str(interaction.user.id), [])
     outgoing = ally_requests.get(str(target_owner_id), [])
     if isinstance(incoming, list):
@@ -5257,6 +5606,13 @@ async def disbandally(
         ally_requests[str(target_owner_id)] = [requester for requester in outgoing if requester != str(interaction.user.id)]
 
     save_faction_state(state)
+
+    ally_channel = await get_text_channel_by_id(interaction.guild, ally_channel_id)
+    if ally_channel is not None:
+        try:
+            await ally_channel.delete(reason=f"Alliance rompue par {interaction.user}")
+        except discord.HTTPException:
+            pass
 
     if had_alliance:
         await interaction.response.send_message(
