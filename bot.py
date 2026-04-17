@@ -44,10 +44,12 @@ from moderation import (
     remove_tempban,
     upsert_tempban,
 )
+from levels import apply_message_xp, get_level_profile, get_top_levels, xp_needed_for_next_level
 
 WELCOME_CHANNEL_ID = 1494255574949429438
 GOODBYE_CHANNEL_ID = 1494255913366978641
 AUTOROLE_CHANNEL_ID = 1494255821054414878
+LEVELUP_CHANNEL_ID = 1494255415259693127
 LOTTERY_CHANNEL_ID = 1494473046499786802
 LOTTERY_PING_ROLE_ID = 1494474779355386027
 TICKET_PANEL_CHANNEL_ID = 1494461780322287667
@@ -85,6 +87,9 @@ LOTTERY_DURATION = timedelta(hours=24)
 PRISON_CHANCE = 0.15
 LOTTERY_ENTRY_COST = 2000
 LOTTERY_PRIZE = 10000
+LEVEL_XP_COOLDOWN = timedelta(seconds=60)
+LEVEL_XP_GAIN = (15, 25)
+LEVEL_REWARD = 300
 JOB_OPTIONS = {
     "mugger": "Braqueur",
     "dealer": "Dealer",
@@ -1272,6 +1277,7 @@ class SukushiBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
         intents.members = True
+        intents.message_content = True
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
         self.tempban_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
@@ -1518,6 +1524,43 @@ class SukushiBot(discord.Client):
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.set_image(url=BANNER_URL)
         await channel.send(embed=embed)
+
+    async def on_message(self, message: discord.Message) -> None:
+        if message.author.bot or message.guild is None:
+            return
+        if not isinstance(message.author, discord.Member):
+            return
+
+        ensure_minimum_balance(message.author.id)
+        gained_xp = random.randint(*LEVEL_XP_GAIN)
+        new_level, levels_gained = apply_message_xp(
+            message.author.id,
+            gained_xp,
+            cooldown=LEVEL_XP_COOLDOWN,
+        )
+        if levels_gained <= 0:
+            return
+
+        reward_total = LEVEL_REWARD * levels_gained
+        new_balance = add_balance(message.author.id, reward_total)
+        channel = self.get_channel(LEVELUP_CHANNEL_ID)
+        if not isinstance(channel, discord.TextChannel):
+            return
+
+        profile = get_level_profile(message.author.id)
+        xp_needed = xp_needed_for_next_level(int(profile["level"]))
+        embed = make_embed(
+            "Niveau superieur",
+            (
+                f"{message.author.mention} vient de passer au **niveau {new_level}**.\n"
+                f"Recompense : **{reward_total} Sukushi Dollars**.\n"
+                f"Progression actuelle : **{profile['xp']}/{xp_needed} XP**."
+            ),
+            color=discord.Color.gold(),
+            footer="Sukushi bot | Niveaux",
+        )
+        embed.add_field(name="Nouveau solde", value=f"**{new_balance} Sukushi Dollars**", inline=False)
+        await channel.send(content=message.author.mention, embed=embed)
 
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent) -> None:
         await self.handle_autorole_reaction(payload, add_role=True)
@@ -2200,6 +2243,31 @@ async def run_leaderboard_action(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(embed=embed)
 
 
+async def run_level_leaderboard_action(interaction: discord.Interaction) -> None:
+    top_levels = get_top_levels(10)
+    if not top_levels:
+        await interaction.response.send_message(
+            "Aucune donnee de niveau disponible pour le moment.",
+            ephemeral=True,
+        )
+        return
+
+    lines: list[str] = []
+    for index, (user_id, level, xp) in enumerate(top_levels, start=1):
+        member = interaction.guild.get_member(user_id) if interaction.guild else None
+        user_label = member.mention if member else f"<@{user_id}>"
+        xp_needed = xp_needed_for_next_level(level)
+        lines.append(f"**{index}.** {user_label} - **Niveau {level}** ({xp}/{xp_needed} XP)")
+
+    embed = make_embed(
+        "Classement des niveaux",
+        "\n".join(lines),
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Niveaux",
+    )
+    await interaction.response.send_message(embed=embed)
+
+
 async def run_daily_action(interaction: discord.Interaction) -> None:
     ensure_minimum_balance(interaction.user.id)
     remaining = get_cooldown_remaining(DAILY_FILE, interaction.user.id, DAILY_COOLDOWN)
@@ -2487,6 +2555,12 @@ class PanelView(OwnerRestrictedView):
             return
         await run_leaderboard_action(interaction)
 
+    @discord.ui.button(label="Niveaux", style=discord.ButtonStyle.secondary, row=0)
+    async def level_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await run_level_leaderboard_action(interaction)
+
     @discord.ui.button(label="Travail", style=discord.ButtonStyle.primary, row=1)
     async def work_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await ensure_panel_access(interaction):
@@ -2538,6 +2612,13 @@ async def play(interaction: discord.Interaction) -> None:
         view=PanelView(interaction.user.id),
         ephemeral=True,
     )
+
+
+@bot.tree.command(name="levelleaderboard", description="Affiche le classement des niveaux.")
+@prison_block()
+@economy_block()
+async def levelleaderboard(interaction: discord.Interaction) -> None:
+    await run_level_leaderboard_action(interaction)
 
 
 @bot.tree.command(name="balance", description="Show your Sukushi Dollars balance.")
