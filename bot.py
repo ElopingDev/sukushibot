@@ -3419,6 +3419,23 @@ async def run_attack_action(
             )
             return
 
+    attacker_faction = get_faction_for_member(attacker.id)
+    target_faction = get_faction_for_member(cible.id)
+    if attacker_faction is not None and target_faction is not None:
+        attacker_owner_id, _ = attacker_faction
+        target_owner_id, _ = target_faction
+        if attacker_owner_id == target_owner_id:
+            await interaction.response.send_message(
+                "Tu ne peux pas attaquer un membre de ta propre faction.",
+                ephemeral=True,
+            )
+            return
+        if factions_are_allied(attacker_owner_id, target_owner_id):
+            await interaction.response.send_message(
+                "Tu ne peux pas attaquer un membre d'une faction alliée.",
+                ephemeral=True,
+            )
+            return
     if attacker.id in ACTIVE_ATTACK_USERS or cible.id in ACTIVE_ATTACK_USERS:
         await interaction.response.send_message(
             "Un de ces joueurs est déjà dans un combat. Attends la fin du duel en cours.",
@@ -4501,87 +4518,7 @@ async def attack(
     interaction: discord.Interaction,
     cible: discord.Member,
 ) -> None:
-    if not isinstance(interaction.user, discord.Member):
-        await interaction.response.send_message(
-            "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
-        )
-        return
-
-    attacker = interaction.user
-    if cible.id == attacker.id:
-        await interaction.response.send_message(
-            "Tu ne peux pas t'attaquer toi-même.",
-            ephemeral=True,
-        )
-        return
-
-    if cible.bot:
-        await interaction.response.send_message(
-            "Tu ne peux pas attaquer un bot.",
-            ephemeral=True,
-        )
-        return
-
-    if attacker.id in ACTIVE_ATTACK_USERS or cible.id in ACTIVE_ATTACK_USERS:
-        await interaction.response.send_message(
-            "Un de ces joueurs est déjà dans un combat. Attends la fin du duel en cours.",
-            ephemeral=True,
-        )
-        return
-
-    if is_in_prison(cible.id):
-        await interaction.response.send_message(
-            f"{cible.mention} est déjà en prison et doit finir son épreuve avant de pouvoir rejouer.",
-            ephemeral=True,
-        )
-        return
-
-    ensure_minimum_balance(attacker.id)
-    ensure_minimum_balance(cible.id)
-
-    global_cooldown_remaining = get_cooldown_remaining(
-        ATTACK_FILE,
-        attacker.id,
-        GLOBAL_ATTACK_COOLDOWN,
-    )
-    if global_cooldown_remaining is not None:
-        await interaction.response.send_message(
-            f"Tu dois attendre **{format_remaining_time(global_cooldown_remaining)}** avant de relancer une attaque.",
-            ephemeral=True,
-        )
-        return
-
-    cooldown_remaining = get_pair_cooldown_remaining(
-        ATTACK_FILE,
-        attacker.id,
-        cible.id,
-        ATTACK_COOLDOWN,
-    )
-    if cooldown_remaining is not None:
-        await interaction.response.send_message(
-            f"Tu dois attendre **{format_remaining_time(cooldown_remaining)}** avant de réattaquer {cible.mention}.",
-            ephemeral=True,
-        )
-        return
-
-    if get_balance_value(attacker.id) <= 0 and get_balance_value(cible.id) <= 0:
-        await interaction.response.send_message(
-            "Aucun de vous deux n'a assez d'argent pour que cette attaque serve à quelque chose.",
-            ephemeral=True,
-        )
-        return
-
-    update_cooldown(ATTACK_FILE, attacker.id)
-    ACTIVE_ATTACK_USERS.add(attacker.id)
-    ACTIVE_ATTACK_USERS.add(cible.id)
-    view = AttackView(attacker, cible)
-    await interaction.response.send_message(
-        content=cible.mention,
-        embed=view.build_embed(),
-        view=view,
-    )
-    view.message = await interaction.original_response()
+    await run_attack_action(interaction, cible)
 
 
 @bot.tree.command(name="blackjack", description="Joue une partie de blackjack.")
