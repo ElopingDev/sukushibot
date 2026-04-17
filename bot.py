@@ -97,6 +97,7 @@ LOTTERY_PRIZE = 10000
 JAIL_CATEGORY_NAME = "prison"
 JAIL_CHANNEL_PREFIX = "cellule"
 JAIL_CHALLENGE_LENGTH = 35
+JAIL_MEMORY_CHALLENGE_LENGTH = 7
 JAIL_MIN_SOLVE_SECONDS = 10
 JAIL_FAILURE_PERCENT = 0.05
 JAIL_TAX_PERCENT_RANGE = (0.05, 0.12)
@@ -407,6 +408,11 @@ def generate_prison_challenge(length: int = JAIL_CHALLENGE_LENGTH) -> str:
     alphabet = string.ascii_letters + string.digits
     rng = random.SystemRandom()
     return "".join(rng.choice(alphabet) for _ in range(length))
+
+
+def generate_memory_prison_challenge(length: int = JAIL_MEMORY_CHALLENGE_LENGTH) -> str:
+    rng = random.SystemRandom()
+    return "".join(rng.choice(string.digits) for _ in range(length))
 
 
 def choose_prison_variant() -> str:
@@ -1576,7 +1582,11 @@ class SukushiBot(discord.Client):
         if variant not in JAIL_VARIANTS:
             variant = "normal"
 
-        challenge = generate_prison_challenge()
+        challenge = (
+            generate_memory_prison_challenge()
+            if variant == "memory"
+            else generate_prison_challenge()
+        )
         sent_at = datetime.now(timezone.utc).isoformat() if variant != "memory" else None
         record = set_prison_record(
             member.id,
