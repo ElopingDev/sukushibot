@@ -123,8 +123,8 @@ SLOTS_JACKPOT_CHANCE = 0.03
 SLOTS_COOLDOWN = timedelta(minutes=1)
 MINES_GRID_SIZE = 4
 MINES_TOTAL_TILES = MINES_GRID_SIZE * MINES_GRID_SIZE
-MINES_HOUSE_EDGE = 0.78
-MINES_MIN_CASHOUT_SAFE = 3
+MINES_HOUSE_EDGE = 0.68
+MINES_MIN_CASHOUT_SAFE = 4
 LEVEL_XP_COOLDOWN = timedelta(seconds=60)
 LEVEL_XP_GAIN = (15, 25)
 LEVEL_REWARD = 300
@@ -690,9 +690,11 @@ def calculate_mines_multiplier(bombs: int, safe_revealed: int) -> float:
     for index in range(safe_revealed):
         multiplier *= (MINES_TOTAL_TILES - index) / (safe_tiles - index)
     early_penalty = {
-        1: 0.35,
-        2: 0.52,
-        3: 0.72,
+        1: 0.18,
+        2: 0.30,
+        3: 0.45,
+        4: 0.62,
+        5: 0.80,
     }
     multiplier *= early_penalty.get(safe_revealed, 1.0)
     return multiplier
@@ -4050,7 +4052,7 @@ class PanelView(OwnerRestrictedView):
         if not await ensure_panel_access(interaction):
             return
         await interaction.response.send_message(
-            "Utilise `/mines mise:<montant> bombes:<3-5>` pour lancer une partie de mines.",
+            "Utilise `/mines mise:<montant> bombes:<4-5>` pour lancer une partie de mines.",
             ephemeral=True,
         )
 
@@ -4436,7 +4438,7 @@ async def slots(interaction: discord.Interaction) -> None:
 async def mines(
     interaction: discord.Interaction,
     mise: app_commands.Range[int, 1, 1_000_000],
-    bombes: app_commands.Range[int, 3, 5],
+    bombes: app_commands.Range[int, 4, 5],
 ) -> None:
     await run_mines_action(interaction, mise, bombes)
 
