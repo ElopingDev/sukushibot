@@ -9,6 +9,42 @@ from pathlib import Path
 import discord
 from discord import app_commands
 
+from economy import (
+    add_balance,
+    add_ecoban,
+    ensure_minimum_balance,
+    get_balance_value,
+    get_cooldown_remaining,
+    get_job,
+    get_pair_cooldown_remaining,
+    get_prison_release,
+    get_top_balances,
+    imprison_user,
+    is_ecobanned,
+    load_economy,
+    load_economy_meta,
+    load_lottery_state,
+    load_json_dict,
+    reset_all_balances,
+    reset_cooldown_files,
+    save_economy,
+    save_economy_meta,
+    save_lottery_state,
+    save_json_dict,
+    set_balance_value,
+    set_job,
+    update_cooldown,
+    update_pair_cooldown,
+)
+from moderation import (
+    can_act_on_target,
+    get_bot_member,
+    get_moderator_member,
+    load_tempbans,
+    remove_tempban,
+    upsert_tempban,
+)
+
 WELCOME_CHANNEL_ID = 1494255574949429438
 GOODBYE_CHANNEL_ID = 1494255913366978641
 AUTOROLE_CHANNEL_ID = 1494255821054414878
@@ -171,253 +207,6 @@ def make_embed(
     return embed
 
 
-def load_economy() -> dict[str, int]:
-    if not ECONOMY_FILE.exists():
-        return {}
-
-    with ECONOMY_FILE.open("r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    return {str(user_id): int(balance) for user_id, balance in data.items()}
-
-
-def save_economy(data: dict[str, int]) -> None:
-    with ECONOMY_FILE.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
-
-
-def load_economy_meta() -> dict[str, list[str]]:
-    if not ECONOMY_META_FILE.exists():
-        return {"seeded_guilds": []}
-
-    with ECONOMY_META_FILE.open("r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    seeded = data.get("seeded_guilds", [])
-    if not isinstance(seeded, list):
-        seeded = []
-    return {"seeded_guilds": [str(guild_id) for guild_id in seeded]}
-
-
-def save_economy_meta(data: dict[str, list[str]]) -> None:
-    with ECONOMY_META_FILE.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
-
-
-def load_ecobans() -> set[int]:
-    if not ECOBAN_FILE.exists():
-        return set()
-
-    with ECOBAN_FILE.open("r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    if not isinstance(data, list):
-        return set()
-
-    result: set[int] = set()
-    for user_id in data:
-        try:
-            result.add(int(user_id))
-        except (TypeError, ValueError):
-            continue
-    return result
-
-
-def save_ecobans(user_ids: set[int]) -> None:
-    with ECOBAN_FILE.open("w", encoding="utf-8") as file:
-        json.dump(sorted(user_ids), file, indent=2, ensure_ascii=False)
-
-
-def is_ecobanned(user_id: int) -> bool:
-    return user_id in load_ecobans()
-
-
-def add_ecoban(user_id: int) -> bool:
-    ecobans = load_ecobans()
-    if user_id in ecobans:
-        return False
-    ecobans.add(user_id)
-    save_ecobans(ecobans)
-    return True
-
-
-def get_balance_value(user_id: int) -> int:
-    data = load_economy()
-    return data.get(str(user_id), 0)
-
-
-def set_balance_value(user_id: int, amount: int) -> int:
-    data = load_economy()
-    data[str(user_id)] = max(0, int(amount))
-    save_economy(data)
-    return data[str(user_id)]
-
-
-def add_balance(user_id: int, amount: int) -> int:
-    data = load_economy()
-    key = str(user_id)
-    data[key] = data.get(key, 0) + amount
-    save_economy(data)
-    return data[key]
-
-
-def ensure_minimum_balance(user_id: int, minimum: int = STARTING_BALANCE) -> int:
-    data = load_economy()
-    key = str(user_id)
-    if key in data:
-        return data[key]
-
-    data[key] = minimum
-    save_economy(data)
-    return data[key]
-
-
-def get_top_balances(limit: int = 10) -> list[tuple[int, int]]:
-    data = load_economy()
-    sorted_balances = sorted(
-        ((int(user_id), balance) for user_id, balance in data.items()),
-        key=lambda item: item[1],
-        reverse=True,
-    )
-    return sorted_balances[:limit]
-
-
-def reset_all_balances(amount: int = STARTING_BALANCE) -> int:
-    data = load_economy()
-    for user_id in list(data.keys()):
-        data[user_id] = amount
-    save_economy(data)
-    return len(data)
-
-
-def load_tempbans() -> dict[str, dict[str, str]]:
-    if not TEMPBAN_FILE.exists():
-        return {}
-
-    with TEMPBAN_FILE.open("r", encoding="utf-8") as file:
-        return json.load(file)
-
-
-def save_tempbans(data: dict[str, dict[str, str]]) -> None:
-    with TEMPBAN_FILE.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
-
-
-def make_tempban_key(guild_id: int, user_id: int) -> str:
-    return f"{guild_id}:{user_id}"
-
-
-def upsert_tempban(
-    guild_id: int,
-    user_id: int,
-    unban_at: datetime,
-    reason: str | None,
-) -> None:
-    data = load_tempbans()
-    data[make_tempban_key(guild_id, user_id)] = {
-        "guild_id": str(guild_id),
-        "user_id": str(user_id),
-        "unban_at": unban_at.astimezone(timezone.utc).isoformat(),
-        "reason": reason or "",
-    }
-    save_tempbans(data)
-
-
-def remove_tempban(guild_id: int, user_id: int) -> None:
-    data = load_tempbans()
-    data.pop(make_tempban_key(guild_id, user_id), None)
-    save_tempbans(data)
-
-
-def load_json_dict(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
-
-    with path.open("r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    return {str(key): str(value) for key, value in data.items()}
-
-
-def save_json_dict(path: Path, data: dict[str, str]) -> None:
-    with path.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
-
-
-def load_lottery_state() -> dict[str, object]:
-    if not LOTTERY_FILE.exists():
-        return {}
-
-    with LOTTERY_FILE.open("r", encoding="utf-8") as file:
-        data = json.load(file)
-
-    return data if isinstance(data, dict) else {}
-
-
-def save_lottery_state(data: dict[str, object]) -> None:
-    with LOTTERY_FILE.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
-
-
-def reset_cooldown_files() -> None:
-    for path in (DAILY_FILE, WORK_FILE, CHANGEJOB_FILE, ATTACK_FILE):
-        save_json_dict(path, {})
-
-
-def get_cooldown_remaining(path: Path, user_id: int, cooldown: timedelta) -> timedelta | None:
-    data = load_json_dict(path)
-    raw_value = data.get(str(user_id))
-    if raw_value is None:
-        return None
-
-    ready_at = datetime.fromisoformat(raw_value) + cooldown
-    now = datetime.now(timezone.utc)
-    if ready_at <= now:
-        data.pop(str(user_id), None)
-        save_json_dict(path, data)
-        return None
-    return ready_at - now
-
-
-def update_cooldown(path: Path, user_id: int) -> None:
-    data = load_json_dict(path)
-    data[str(user_id)] = datetime.now(timezone.utc).isoformat()
-    save_json_dict(path, data)
-
-
-def get_job(user_id: int) -> str | None:
-    data = load_json_dict(JOB_FILE)
-    return data.get(str(user_id))
-
-
-def set_job(user_id: int, job_key: str) -> None:
-    data = load_json_dict(JOB_FILE)
-    data[str(user_id)] = job_key
-    save_json_dict(JOB_FILE, data)
-
-
-def get_prison_release(user_id: int) -> datetime | None:
-    data = load_json_dict(PRISON_FILE)
-    raw_value = data.get(str(user_id))
-    if raw_value is None:
-        return None
-
-    release_at = datetime.fromisoformat(raw_value)
-    if release_at <= datetime.now(timezone.utc):
-        data.pop(str(user_id), None)
-        save_json_dict(PRISON_FILE, data)
-        return None
-    return release_at
-
-
-def imprison_user(user_id: int, duration: timedelta = PRISON_DURATION) -> datetime:
-    release_at = datetime.now(timezone.utc) + duration
-    data = load_json_dict(PRISON_FILE)
-    data[str(user_id)] = release_at.isoformat()
-    save_json_dict(PRISON_FILE, data)
-    return release_at
-
-
 def format_remaining_time(duration: timedelta) -> str:
     total_seconds = max(1, int(duration.total_seconds()))
     minutes, seconds = divmod(total_seconds, 60)
@@ -431,36 +220,6 @@ def format_remaining_time(duration: timedelta) -> str:
     if seconds and not hours:
         parts.append(f"{seconds}s")
     return " ".join(parts)
-
-
-def make_pair_cooldown_key(user_id: int, target_id: int) -> str:
-    return f"{user_id}:{target_id}"
-
-
-def get_pair_cooldown_remaining(
-    path: Path,
-    user_id: int,
-    target_id: int,
-    cooldown: timedelta,
-) -> timedelta | None:
-    data = load_json_dict(path)
-    raw_value = data.get(make_pair_cooldown_key(user_id, target_id))
-    if raw_value is None:
-        return None
-
-    ready_at = datetime.fromisoformat(raw_value) + cooldown
-    now = datetime.now(timezone.utc)
-    if ready_at <= now:
-        data.pop(make_pair_cooldown_key(user_id, target_id), None)
-        save_json_dict(path, data)
-        return None
-    return ready_at - now
-
-
-def update_pair_cooldown(path: Path, user_id: int, target_id: int) -> None:
-    data = load_json_dict(path)
-    data[make_pair_cooldown_key(user_id, target_id)] = datetime.now(timezone.utc).isoformat()
-    save_json_dict(path, data)
 
 
 def can_bypass_prison(member: discord.abc.User | discord.Member) -> bool:
@@ -684,11 +443,11 @@ def format_timedelta(duration: timedelta) -> str:
     return " ".join(parts) or "0s"
 
 
-def get_moderator_member(interaction: discord.Interaction) -> discord.Member | None:
+def _legacy_get_moderator_member(interaction: discord.Interaction) -> discord.Member | None:
     return interaction.user if isinstance(interaction.user, discord.Member) else None
 
 
-def get_bot_member(
+def _legacy_get_bot_member(
     guild: discord.Guild,
     client_user: discord.ClientUser | None,
 ) -> discord.Member | None:
@@ -697,7 +456,7 @@ def get_bot_member(
     return guild.get_member(client_user.id)
 
 
-def can_act_on_target(
+def _legacy_can_act_on_target(
     moderator: discord.Member,
     target: discord.Member,
     bot_member: discord.Member,
