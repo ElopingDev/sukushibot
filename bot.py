@@ -33,6 +33,7 @@ PRISON_FILE = Path("prison.json")
 ATTACK_FILE = Path("attack_cooldowns.json")
 CHANGEJOB_FILE = Path("changejob.json")
 LOTTERY_FILE = Path("lottery.json")
+ECOBAN_FILE = Path("ecoban.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
 DAILY_REWARD = 500
@@ -201,6 +202,43 @@ def load_economy_meta() -> dict[str, list[str]]:
 def save_economy_meta(data: dict[str, list[str]]) -> None:
     with ECONOMY_META_FILE.open("w", encoding="utf-8") as file:
         json.dump(data, file, indent=2, ensure_ascii=False)
+
+
+def load_ecobans() -> set[int]:
+    if not ECOBAN_FILE.exists():
+        return set()
+
+    with ECOBAN_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    if not isinstance(data, list):
+        return set()
+
+    result: set[int] = set()
+    for user_id in data:
+        try:
+            result.add(int(user_id))
+        except (TypeError, ValueError):
+            continue
+    return result
+
+
+def save_ecobans(user_ids: set[int]) -> None:
+    with ECOBAN_FILE.open("w", encoding="utf-8") as file:
+        json.dump(sorted(user_ids), file, indent=2, ensure_ascii=False)
+
+
+def is_ecobanned(user_id: int) -> bool:
+    return user_id in load_ecobans()
+
+
+def add_ecoban(user_id: int) -> bool:
+    ecobans = load_ecobans()
+    if user_id in ecobans:
+        return False
+    ecobans.add(user_id)
+    save_ecobans(ecobans)
+    return True
 
 
 def get_balance_value(user_id: int) -> int:
@@ -467,12 +505,35 @@ async def ensure_not_in_prison(
     return False
 
 
+async def ensure_not_ecobanned(interaction: discord.Interaction) -> bool:
+    if is_ecobanned(interaction.user.id):
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                "Tu es banni des commandes économiques du bot.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "Tu es banni des commandes économiques du bot.",
+                ephemeral=True,
+            )
+        return False
+    return True
+
+
 def prison_block(*, allow_staff_bypass: bool = False):
     async def predicate(interaction: discord.Interaction) -> bool:
         return await ensure_not_in_prison(
             interaction,
             allow_staff_bypass=allow_staff_bypass,
         )
+
+    return app_commands.check(predicate)
+
+
+def economy_block():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        return await ensure_not_ecobanned(interaction)
 
     return app_commands.check(predicate)
 
@@ -746,6 +807,8 @@ class AttackView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not await ensure_not_in_prison(interaction):
             return False
+        if not await ensure_not_ecobanned(interaction):
+            return False
         if interaction.user.id != self.attacker.id:
             await interaction.response.send_message(
                 "Seul le joueur qui a lancé cette attaque peut utiliser ce bouton.",
@@ -892,6 +955,8 @@ class BlackjackView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not await ensure_not_in_prison(interaction):
+            return False
+        if not await ensure_not_ecobanned(interaction):
             return False
         if interaction.user.id != self.player.id:
             await interaction.response.send_message(
@@ -1040,6 +1105,8 @@ class JobSelect(discord.ui.Select):
         self.allow_change = allow_change
 
     async def callback(self, interaction: discord.Interaction) -> None:
+        if not await ensure_not_ecobanned(interaction):
+            return
         if interaction.user.id != self.player.id:
             await interaction.response.send_message(
                 "Seul le joueur qui a ouvert ce menu peut choisir le métier.",
@@ -1096,6 +1163,8 @@ class JobSelectView(discord.ui.View):
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not await ensure_not_in_prison(interaction):
+            return False
+        if not await ensure_not_ecobanned(interaction):
             return False
         if interaction.user.id != self.player.id:
             await interaction.response.send_message(
@@ -1832,6 +1901,7 @@ async def ping(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="balance", description="Show your Sukushi Dollars balance.")
 @prison_block()
+@economy_block()
 async def balance(interaction: discord.Interaction) -> None:
     ensure_minimum_balance(interaction.user.id)
     amount = get_balance_value(interaction.user.id)
@@ -1846,6 +1916,7 @@ async def balance(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="pay", description="Donne une partie de ton argent à un autre joueur.")
 @prison_block()
+@economy_block()
 async def pay(
     interaction: discord.Interaction,
     cible: discord.Member,
@@ -1901,6 +1972,7 @@ async def pay(
 
 @bot.tree.command(name="leaderboard", description="Show the richest users on the server.")
 @prison_block()
+@economy_block()
 async def leaderboard(interaction: discord.Interaction) -> None:
     top_balances = get_top_balances(10)
     if not top_balances:
@@ -1927,6 +1999,7 @@ async def leaderboard(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="daily", description="Claim your daily Sukushi Dollars.")
 @prison_block()
+@economy_block()
 async def daily(interaction: discord.Interaction) -> None:
     ensure_minimum_balance(interaction.user.id)
     remaining = get_cooldown_remaining(DAILY_FILE, interaction.user.id, DAILY_COOLDOWN)
@@ -1953,6 +2026,7 @@ async def daily(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="getjob", description="Choose your permanent crime job.")
 @prison_block()
+@economy_block()
 async def getjob(interaction: discord.Interaction) -> None:
     ensure_minimum_balance(interaction.user.id)
     current_job = get_job(interaction.user.id)
@@ -1978,6 +2052,7 @@ async def getjob(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="changejob", description="Change ton métier avec un cooldown de 24h.")
 @prison_block()
+@economy_block()
 async def changejob(interaction: discord.Interaction) -> None:
     ensure_minimum_balance(interaction.user.id)
     current_job = get_job(interaction.user.id)
@@ -2011,6 +2086,7 @@ async def changejob(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="work", description="Do a crime job minigame for your daily pay.")
 @prison_block()
+@economy_block()
 async def work(interaction: discord.Interaction) -> None:
     ensure_minimum_balance(interaction.user.id)
     job_key = get_job(interaction.user.id)
@@ -2036,6 +2112,7 @@ async def work(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="attack", description="Attaque un autre joueur pour lui voler un peu d'argent.")
 @prison_block()
+@economy_block()
 async def attack(
     interaction: discord.Interaction,
     cible: discord.Member,
@@ -2127,6 +2204,7 @@ async def attack(
 
 @bot.tree.command(name="blackjack", description="Joue une partie de blackjack.")
 @prison_block()
+@economy_block()
 async def blackjack(
     interaction: discord.Interaction,
     mise: app_commands.Range[int, 1, 1_000_000],
@@ -2577,6 +2655,51 @@ async def resetallbal(interaction: discord.Interaction) -> None:
         ),
         ephemeral=True,
     )
+
+
+@bot.tree.command(name="resetmoney", description="Reset l'argent d'un utilisateur a 0.")
+@prison_block(allow_staff_bypass=True)
+async def resetmoney(
+    interaction: discord.Interaction,
+    member: discord.Member,
+) -> None:
+    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+        await interaction.response.send_message(
+            "Tu n'es pas autorise a utiliser cette commande.",
+            ephemeral=True,
+        )
+        return
+
+    new_balance = set_balance_value(member.id, 0)
+    await interaction.response.send_message(
+        f"L'argent de {member.mention} a ete reinitialise a **{new_balance} Sukushi Dollars**.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="ecoban", description="Bannit un utilisateur des commandes economiques.")
+@prison_block(allow_staff_bypass=True)
+async def ecoban(
+    interaction: discord.Interaction,
+    member: discord.Member,
+) -> None:
+    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+        await interaction.response.send_message(
+            "Tu n'es pas autorise a utiliser cette commande.",
+            ephemeral=True,
+        )
+        return
+
+    if add_ecoban(member.id):
+        await interaction.response.send_message(
+            f"{member.mention} est maintenant banni des commandes economiques.",
+            ephemeral=True,
+        )
+    else:
+        await interaction.response.send_message(
+            f"{member.mention} est deja banni des commandes economiques.",
+            ephemeral=True,
+        )
 
 
 def main() -> None:
