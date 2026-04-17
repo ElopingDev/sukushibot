@@ -72,15 +72,15 @@ LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
-DAILY_REWARD = 500
+DAILY_REWARD = 1500
 WORK_REWARD = 1000
 WORK_FAIL_REWARD = 500
 DAILY_COOLDOWN = timedelta(days=1)
-WORK_COOLDOWN = timedelta(days=1)
+WORK_COOLDOWN = timedelta(minutes=45)
 ATTACK_COOLDOWN = timedelta(hours=5)
-GLOBAL_ATTACK_COOLDOWN = timedelta(minutes=30)
+GLOBAL_ATTACK_COOLDOWN = timedelta(minutes=15)
 CHANGEJOB_COOLDOWN = timedelta(days=1)
-PRISON_DURATION = timedelta(minutes=10)
+PRISON_DURATION = timedelta(minutes=50)
 LOTTERY_DURATION = timedelta(hours=24)
 PRISON_CHANCE = 0.15
 LOTTERY_ENTRY_COST = 2000
@@ -97,7 +97,7 @@ JOB_ACTIONS = {
         "actions": [
             {"label": "Voler un passant", "reward": 700, "catch_chance": 0.05},
             {"label": "Braquer une supérette", "reward": 1050, "catch_chance": 0.15},
-            {"label": "Braquer un bijoutier", "reward": 1500, "catch_chance": 0.45},
+            {"label": "Braquer un bijoutier", "reward": 1500, "catch_chance": 0.35},
         ],
     },
     "dealer": {
