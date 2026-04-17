@@ -4587,14 +4587,12 @@ async def createfaction(
     if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
     if get_faction_for_member(interaction.user.id) is not None:
         await interaction.response.send_message(
             "Tu fais déjà partie d'une faction.",
-            ephemeral=True,
         )
         return
 
@@ -4602,7 +4600,6 @@ async def createfaction(
     if not faction_name:
         await interaction.response.send_message(
             "Le nom de la faction ne peut pas être vide.",
-            ephemeral=True,
         )
         return
 
@@ -4611,7 +4608,6 @@ async def createfaction(
         if existing_name.casefold() == faction_name.casefold():
             await interaction.response.send_message(
                 "Une faction avec ce nom existe déjà.",
-                ephemeral=True,
             )
             return
 
@@ -4639,7 +4635,6 @@ async def createfaction(
             f"Ta faction **{faction_name}** a été créée.\n"
             "Utilise `/setfactiontag` pour définir un tag, puis `/invitefaction` pour recruter."
         ),
-        ephemeral=True,
     )
 
 
@@ -4651,7 +4646,6 @@ async def setfactiontag(
     if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -4659,7 +4653,6 @@ async def setfactiontag(
     if faction is None:
         await interaction.response.send_message(
             "Tu dois être chef d'une faction pour définir un tag.",
-            ephemeral=True,
         )
         return
 
@@ -4667,7 +4660,6 @@ async def setfactiontag(
     if not FACTION_TAG_PATTERN.fullmatch(normalized_tag):
         await interaction.response.send_message(
             "Le tag doit faire 1 à 4 caractères, sans espace, avec uniquement des lettres ou chiffres.",
-            ephemeral=True,
         )
         return
 
@@ -4677,7 +4669,6 @@ async def setfactiontag(
         if normalize_faction_tag(str(other_faction.get("tag") or "")) == normalized_tag:
             await interaction.response.send_message(
                 "Ce tag est déjà utilisé par une autre faction.",
-                ephemeral=True,
             )
             return
 
@@ -4686,7 +4677,6 @@ async def setfactiontag(
     if not isinstance(factions, dict):
         await interaction.response.send_message(
             "Impossible de mettre à jour la faction pour le moment.",
-            ephemeral=True,
         )
         return
 
@@ -4694,7 +4684,6 @@ async def setfactiontag(
     if not isinstance(faction_entry, dict):
         await interaction.response.send_message(
             "Faction introuvable.",
-            ephemeral=True,
         )
         return
 
@@ -4736,7 +4725,6 @@ async def setfactiontag(
             f"Le tag de la faction est maintenant **{normalized_tag}**.\n"
             f"Tags synchronisés pour **{updated_members}** membre(s).{note}"
         ),
-        ephemeral=True,
     )
 
 
@@ -4748,7 +4736,6 @@ async def invitefaction(
     if not isinstance(interaction.user, discord.Member):
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -4756,38 +4743,33 @@ async def invitefaction(
     if faction is None:
         await interaction.response.send_message(
             "Tu dois être chef d'une faction pour inviter quelqu'un.",
-            ephemeral=True,
         )
         return
 
     if membre.bot:
         await interaction.response.send_message(
             "Tu ne peux pas inviter un bot.",
-            ephemeral=True,
         )
         return
 
     if membre.id == interaction.user.id:
         await interaction.response.send_message(
             "Tu es déjà dans ta propre faction.",
-            ephemeral=True,
         )
         return
 
     if get_faction_for_member(membre.id) is not None:
         await interaction.response.send_message(
             f"{membre.mention} fait déjà partie d'une faction.",
-            ephemeral=True,
         )
         return
 
     set_faction_invite(membre.id, interaction.user.id)
     await interaction.response.send_message(
         (
-            f"{membre.mention} a reçu une invitation pour rejoindre **{faction.get('name') or 'ta faction'}**.\n"
+            f"{membre.mention}, **{interaction.user.display_name}** t'invite à rejoindre la faction **{faction.get('name') or 'ta faction'}**.\n"
             "La personne doit utiliser `/joinfaction` pour accepter."
         ),
-        ephemeral=True,
     )
 
 
@@ -4796,14 +4778,12 @@ async def joinfaction(interaction: discord.Interaction) -> None:
     if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
     if get_faction_for_member(interaction.user.id) is not None:
         await interaction.response.send_message(
             "Tu fais déjà partie d'une faction.",
-            ephemeral=True,
         )
         return
 
@@ -4811,7 +4791,6 @@ async def joinfaction(interaction: discord.Interaction) -> None:
     if owner_id is None:
         await interaction.response.send_message(
             "Tu n'as aucune invitation de faction en attente.",
-            ephemeral=True,
         )
         return
 
@@ -4821,7 +4800,6 @@ async def joinfaction(interaction: discord.Interaction) -> None:
     if not isinstance(factions, dict) or not isinstance(invites, dict):
         await interaction.response.send_message(
             "Impossible de rejoindre une faction pour le moment.",
-            ephemeral=True,
         )
         return
 
@@ -4831,7 +4809,6 @@ async def joinfaction(interaction: discord.Interaction) -> None:
         save_faction_state(state)
         await interaction.response.send_message(
             "Cette invitation n'est plus valide.",
-            ephemeral=True,
         )
         return
 
@@ -4861,7 +4838,6 @@ async def joinfaction(interaction: discord.Interaction) -> None:
 
     await interaction.response.send_message(
         f"Tu as rejoint la faction **{faction.get('name') or 'inconnue'}**.{nickname_note}",
-        ephemeral=True,
     )
 
 
@@ -4870,7 +4846,6 @@ async def leavefaction(interaction: discord.Interaction) -> None:
     if not isinstance(interaction.user, discord.Member):
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -4878,7 +4853,6 @@ async def leavefaction(interaction: discord.Interaction) -> None:
     if faction_info is None:
         await interaction.response.send_message(
             "Tu ne fais partie d'aucune faction.",
-            ephemeral=True,
         )
         return
 
@@ -4886,7 +4860,6 @@ async def leavefaction(interaction: discord.Interaction) -> None:
     if owner_id == interaction.user.id:
         await interaction.response.send_message(
             "Le chef ne peut pas quitter sa faction. Utilise `/disbandfaction` à la place.",
-            ephemeral=True,
         )
         return
 
@@ -4895,7 +4868,6 @@ async def leavefaction(interaction: discord.Interaction) -> None:
     if not isinstance(factions, dict):
         await interaction.response.send_message(
             "Impossible de quitter la faction pour le moment.",
-            ephemeral=True,
         )
         return
 
@@ -4903,7 +4875,6 @@ async def leavefaction(interaction: discord.Interaction) -> None:
     if not isinstance(faction_entry, dict):
         await interaction.response.send_message(
             "Faction introuvable.",
-            ephemeral=True,
         )
         return
 
@@ -4927,7 +4898,6 @@ async def leavefaction(interaction: discord.Interaction) -> None:
 
     await interaction.response.send_message(
         f"Tu as quitté la faction **{faction_entry.get('name') or 'inconnue'}**.",
-        ephemeral=True,
     )
 
 
@@ -4939,7 +4909,6 @@ async def kickfaction(
     if not isinstance(interaction.user, discord.Member):
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -4947,14 +4916,12 @@ async def kickfaction(
     if faction is None:
         await interaction.response.send_message(
             "Tu dois être chef d'une faction pour retirer un membre.",
-            ephemeral=True,
         )
         return
 
     if membre.id == interaction.user.id:
         await interaction.response.send_message(
             "Utilise `/disbandfaction` si tu veux fermer ta faction.",
-            ephemeral=True,
         )
         return
 
@@ -4962,7 +4929,6 @@ async def kickfaction(
     if target_faction is None or target_faction[0] != interaction.user.id:
         await interaction.response.send_message(
             f"{membre.mention} n'est pas dans ta faction.",
-            ephemeral=True,
         )
         return
 
@@ -4971,7 +4937,6 @@ async def kickfaction(
     if not isinstance(factions, dict):
         await interaction.response.send_message(
             "Impossible de retirer ce membre pour le moment.",
-            ephemeral=True,
         )
         return
 
@@ -4979,7 +4944,6 @@ async def kickfaction(
     if not isinstance(faction_entry, dict):
         await interaction.response.send_message(
             "Faction introuvable.",
-            ephemeral=True,
         )
         return
 
@@ -5003,7 +4967,6 @@ async def kickfaction(
 
     await interaction.response.send_message(
         f"{membre.mention} a été retiré de la faction **{faction_entry.get('name') or 'inconnue'}**.",
-        ephemeral=True,
     )
 
 
@@ -5012,7 +4975,6 @@ async def disbandfaction(interaction: discord.Interaction) -> None:
     if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
         await interaction.response.send_message(
             "Cette commande doit être utilisée dans le serveur.",
-            ephemeral=True,
         )
         return
 
@@ -5022,7 +4984,6 @@ async def disbandfaction(interaction: discord.Interaction) -> None:
     if not isinstance(factions, dict) or not isinstance(invites, dict):
         await interaction.response.send_message(
             "Impossible de dissoudre la faction pour le moment.",
-            ephemeral=True,
         )
         return
 
@@ -5030,7 +4991,6 @@ async def disbandfaction(interaction: discord.Interaction) -> None:
     if not isinstance(faction, dict):
         await interaction.response.send_message(
             "Tu n'es chef d'aucune faction.",
-            ephemeral=True,
         )
         return
 
@@ -5074,7 +5034,6 @@ async def disbandfaction(interaction: discord.Interaction) -> None:
             f"La faction **{faction.get('name') or 'inconnue'}** a été dissoute.\n"
             f"Pseudo restauré pour **{restored}** membre(s).{note}"
         ),
-        ephemeral=True,
     )
 
 
@@ -5091,20 +5050,17 @@ async def faction(interaction: discord.Interaction) -> None:
                     "Tu ne fais partie d'aucune faction.\n"
                     f"Invitation en attente : **{pending_name}**. Utilise `/joinfaction` pour accepter."
                 ),
-                ephemeral=True,
             )
             return
 
         await interaction.response.send_message(
             "Tu ne fais partie d'aucune faction.",
-            ephemeral=True,
         )
         return
 
     owner_id, faction_data = faction_info
     await interaction.response.send_message(
         embed=build_faction_embed(interaction.guild, owner_id=owner_id, faction=faction_data),
-        ephemeral=True,
     )
 
 
