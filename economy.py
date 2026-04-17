@@ -218,6 +218,9 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
             "challenge": "",
             "challenge_sent_at": None,
             "attempts": 0,
+            "variant": "normal",
+            "tax_amount": 0,
+            "prompt_message_id": None,
         }
 
     if not isinstance(raw_value, dict):
@@ -254,6 +257,25 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
     except (TypeError, ValueError):
         attempts = 0
 
+    variant = raw_value.get("variant")
+    if not isinstance(variant, str) or not variant:
+        variant = "normal"
+
+    tax_amount = raw_value.get("tax_amount", 0)
+    try:
+        tax_amount = max(0, int(tax_amount))
+    except (TypeError, ValueError):
+        tax_amount = 0
+
+    prompt_message_id = raw_value.get("prompt_message_id")
+    if isinstance(prompt_message_id, bool):
+        prompt_message_id = None
+    elif prompt_message_id is not None:
+        try:
+            prompt_message_id = int(prompt_message_id)
+        except (TypeError, ValueError):
+            prompt_message_id = None
+
     return {
         "jailed_at": jailed_at,
         "reason": reason,
@@ -261,6 +283,9 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
         "challenge": challenge,
         "challenge_sent_at": challenge_sent_at,
         "attempts": attempts,
+        "variant": variant,
+        "tax_amount": tax_amount,
+        "prompt_message_id": prompt_message_id,
     }
 
 
