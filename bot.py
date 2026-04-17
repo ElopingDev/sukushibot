@@ -86,6 +86,7 @@ ATTACK_FILE = Path("attack_cooldowns.json")
 CHANGEJOB_FILE = Path("changejob.json")
 LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
+SLOTS_COOLDOWN_FILE = Path("slots_cooldowns.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
 DAILY_REWARD = 1500
@@ -118,7 +119,8 @@ EVENT_TIMEOUT = timedelta(seconds=45)
 EVENT_LOOP_POLL_INTERVAL = 30
 EVENT_INTERVAL = timedelta(minutes=30)
 SLOTS_COST = 100
-SLOTS_JACKPOT_CHANCE = 0.10
+SLOTS_JACKPOT_CHANCE = 0.03
+SLOTS_COOLDOWN = timedelta(minutes=1)
 MINES_GRID_SIZE = 4
 MINES_TOTAL_TILES = MINES_GRID_SIZE * MINES_GRID_SIZE
 MINES_HOUSE_EDGE = 0.78
@@ -3753,6 +3755,14 @@ async def run_blackjack_action(interaction: discord.Interaction, mise: int) -> N
 
 async def run_slots_action(interaction: discord.Interaction) -> None:
     ensure_minimum_balance(interaction.user.id)
+    remaining = get_cooldown_remaining(SLOTS_COOLDOWN_FILE, interaction.user.id, SLOTS_COOLDOWN)
+    if remaining is not None:
+        await interaction.response.send_message(
+            f"Tu dois attendre **{format_remaining_time(remaining)}** avant de rejouer aux slots.",
+            ephemeral=True,
+        )
+        return
+
     balance_value = get_balance_value(interaction.user.id)
     if balance_value < SLOTS_COST:
         await interaction.response.send_message(
@@ -3766,6 +3776,7 @@ async def run_slots_action(interaction: discord.Interaction) -> None:
     coin_symbol = get_custom_emoji_text(guild, "coinbag", fallback="🪙")
     miss_symbol = "✖️"
 
+    update_cooldown(SLOTS_COOLDOWN_FILE, interaction.user.id)
     new_balance = set_balance_value(interaction.user.id, balance_value - SLOTS_COST)
     pot_amount = add_slots_pot(SLOTS_COST)
 

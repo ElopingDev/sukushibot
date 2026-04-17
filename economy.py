@@ -14,7 +14,7 @@ LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
 EVENT_FILE = Path("event.json")
 SLOTS_FILE = Path("slots.json")
-DEFAULT_SLOTS_POT = 500
+DEFAULT_SLOTS_POT = 0
 
 
 def load_economy() -> dict[str, int]:
@@ -202,7 +202,7 @@ def load_slots_state() -> dict[str, int]:
 
     pot = data.get("pot", 0)
     try:
-        pot = max(DEFAULT_SLOTS_POT, int(pot))
+        pot = max(0, int(pot))
     except (TypeError, ValueError):
         pot = DEFAULT_SLOTS_POT
     return {"pot": pot}
