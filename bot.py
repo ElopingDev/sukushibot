@@ -415,6 +415,31 @@ def get_faction_member_count(faction: dict[str, object]) -> int:
     return len(members) if isinstance(members, dict) else 0
 
 
+def get_faction_allies(faction: dict[str, object]) -> set[str]:
+    raw_allies = faction.get("allies", [])
+    if not isinstance(raw_allies, list):
+        return set()
+    return {str(ally_id) for ally_id in raw_allies}
+
+
+def get_faction_by_tag(tag: str) -> tuple[int, dict[str, object]] | None:
+    normalized_tag = normalize_faction_tag(tag)
+    for owner_id, faction in get_all_factions():
+        if normalize_faction_tag(str(faction.get("tag") or "")) == normalized_tag:
+            return owner_id, faction
+    return None
+
+
+def factions_are_allied(owner_a: int, owner_b: int) -> bool:
+    if owner_a == owner_b:
+        return False
+    faction_a = get_faction_by_owner(owner_a)
+    faction_b = get_faction_by_owner(owner_b)
+    if faction_a is None or faction_b is None:
+        return False
+    return str(owner_b) in get_faction_allies(faction_a) and str(owner_a) in get_faction_allies(faction_b)
+
+
 async def sync_member_faction_nickname(
     member: discord.Member,
     *,
@@ -3376,6 +3401,24 @@ async def run_attack_action(
         )
         return
 
+    attacker_faction = get_faction_for_member(attacker.id)
+    target_faction = get_faction_for_member(cible.id)
+    if attacker_faction is not None and target_faction is not None:
+        attacker_owner_id, _ = attacker_faction
+        target_owner_id, _ = target_faction
+        if attacker_owner_id == target_owner_id:
+            await interaction.response.send_message(
+                "Tu ne peux pas attaquer un membre de ta propre faction.",
+                ephemeral=True,
+            )
+            return
+        if factions_are_allied(attacker_owner_id, target_owner_id):
+            await interaction.response.send_message(
+                "Tu ne peux pas attaquer un membre d'une faction alliée.",
+                ephemeral=True,
+            )
+            return
+
     if attacker.id in ACTIVE_ATTACK_USERS or cible.id in ACTIVE_ATTACK_USERS:
         await interaction.response.send_message(
             "Un de ces joueurs est déjà dans un combat. Attends la fin du duel en cours.",
@@ -4621,6 +4664,7 @@ async def createfaction(
         "name": faction_name,
         "tag": "",
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "allies": [],
         "members": {
             str(interaction.user.id): {
                 "joined_at": datetime.now(timezone.utc).isoformat(),
@@ -4998,10 +5042,25 @@ async def disbandfaction(interaction: discord.Interaction) -> None:
     members = faction.get("members", {})
     if not isinstance(members, dict):
         members = {}
+    allies = get_faction_allies(faction)
 
     for target_id, invited_owner_id in list(invites.items()):
         if invited_owner_id == str(interaction.user.id):
             invites.pop(target_id, None)
+
+    ally_requests = state.get("ally_requests", {})
+    if isinstance(ally_requests, dict):
+        ally_requests.pop(str(interaction.user.id), None)
+        for target_owner_id, requesters in list(ally_requests.items()):
+            if isinstance(requesters, list):
+                ally_requests[target_owner_id] = [requester for requester in requesters if requester != str(interaction.user.id)]
+
+    for ally_owner_id in allies:
+        other_faction = factions.get(str(ally_owner_id))
+        if isinstance(other_faction, dict):
+            other_allies = other_faction.get("allies", [])
+            if isinstance(other_allies, list):
+                other_faction["allies"] = [ally_id for ally_id in other_allies if ally_id != str(interaction.user.id)]
 
     save_faction_state(state)
 
@@ -5062,6 +5121,197 @@ async def faction(interaction: discord.Interaction) -> None:
     await interaction.response.send_message(
         embed=build_faction_embed(interaction.guild, owner_id=owner_id, faction=faction_data),
     )
+
+
+@bot.tree.command(name="ally", description="Envoie ou accepte une demande d'alliance via un tag de faction.")
+async def ally(
+    interaction: discord.Interaction,
+    tag: str,
+) -> None:
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+        )
+        return
+
+    own_faction = get_faction_by_owner(interaction.user.id)
+    if own_faction is None:
+        await interaction.response.send_message(
+            "Tu dois être chef d'une faction pour gérer les alliances.",
+        )
+        return
+
+    target_info = get_faction_by_tag(tag)
+    if target_info is None:
+        await interaction.response.send_message(
+            "Aucune faction ne correspond à ce tag.",
+        )
+        return
+
+    target_owner_id, target_faction = target_info
+    if target_owner_id == interaction.user.id:
+        await interaction.response.send_message(
+            "Tu ne peux pas t'allier avec ta propre faction.",
+        )
+        return
+
+    if factions_are_allied(interaction.user.id, target_owner_id):
+        await interaction.response.send_message(
+            f"Ta faction est déjà alliée avec **{target_faction.get('name') or 'cette faction'}**.",
+        )
+        return
+
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    ally_requests = state.get("ally_requests", {})
+    if not isinstance(factions, dict) or not isinstance(ally_requests, dict):
+        await interaction.response.send_message(
+            "Impossible de gérer les alliances pour le moment.",
+        )
+        return
+
+    own_entry = factions.get(str(interaction.user.id))
+    target_entry = factions.get(str(target_owner_id))
+    if not isinstance(own_entry, dict) or not isinstance(target_entry, dict):
+        await interaction.response.send_message(
+            "Une des factions est introuvable.",
+        )
+        return
+
+    incoming_requests = ally_requests.get(str(interaction.user.id), [])
+    if not isinstance(incoming_requests, list):
+        incoming_requests = []
+        ally_requests[str(interaction.user.id)] = incoming_requests
+
+    own_allies = own_entry.get("allies", [])
+    target_allies = target_entry.get("allies", [])
+    if not isinstance(own_allies, list):
+        own_allies = []
+        own_entry["allies"] = own_allies
+    if not isinstance(target_allies, list):
+        target_allies = []
+        target_entry["allies"] = target_allies
+
+    if str(target_owner_id) in incoming_requests:
+        incoming_requests = [requester for requester in incoming_requests if requester != str(target_owner_id)]
+        ally_requests[str(interaction.user.id)] = incoming_requests
+        if str(target_owner_id) not in own_allies:
+            own_allies.append(str(target_owner_id))
+        if str(interaction.user.id) not in target_allies:
+            target_allies.append(str(interaction.user.id))
+        save_faction_state(state)
+        await interaction.response.send_message(
+            (
+                f"Alliance confirmée entre **{own_entry.get('name') or 'ta faction'}** "
+                f"et **{target_entry.get('name') or 'cette faction'}**."
+            ),
+        )
+        return
+
+    outgoing_requests = ally_requests.get(str(target_owner_id), [])
+    if not isinstance(outgoing_requests, list):
+        outgoing_requests = []
+        ally_requests[str(target_owner_id)] = outgoing_requests
+
+    if str(interaction.user.id) in outgoing_requests:
+        await interaction.response.send_message(
+            (
+                f"Une demande d'alliance a déjà été envoyée à **{target_entry.get('name') or 'cette faction'}**.\n"
+                "Le chef adverse doit utiliser `/ally <ton tag>` pour accepter."
+            ),
+        )
+        return
+
+    outgoing_requests.append(str(interaction.user.id))
+    ally_requests[str(target_owner_id)] = outgoing_requests
+    save_faction_state(state)
+    await interaction.response.send_message(
+        (
+            f"Demande d'alliance envoyée à **{target_entry.get('name') or 'cette faction'}**.\n"
+            f"Leur chef doit utiliser `/ally {own_entry.get('tag') or 'TAG'}` pour accepter."
+        ),
+    )
+
+
+@bot.tree.command(name="disbandally", description="Met fin à une alliance avec une autre faction.")
+async def disbandally(
+    interaction: discord.Interaction,
+    tag: str,
+) -> None:
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+        )
+        return
+
+    own_faction = get_faction_by_owner(interaction.user.id)
+    if own_faction is None:
+        await interaction.response.send_message(
+            "Tu dois être chef d'une faction pour gérer les alliances.",
+        )
+        return
+
+    target_info = get_faction_by_tag(tag)
+    if target_info is None:
+        await interaction.response.send_message(
+            "Aucune faction ne correspond à ce tag.",
+        )
+        return
+
+    target_owner_id, target_faction = target_info
+    if target_owner_id == interaction.user.id:
+        await interaction.response.send_message(
+            "Tu ne peux pas casser une alliance avec ta propre faction.",
+        )
+        return
+
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    ally_requests = state.get("ally_requests", {})
+    if not isinstance(factions, dict) or not isinstance(ally_requests, dict):
+        await interaction.response.send_message(
+            "Impossible de modifier les alliances pour le moment.",
+        )
+        return
+
+    own_entry = factions.get(str(interaction.user.id))
+    target_entry = factions.get(str(target_owner_id))
+    if not isinstance(own_entry, dict) or not isinstance(target_entry, dict):
+        await interaction.response.send_message(
+            "Une des factions est introuvable.",
+        )
+        return
+
+    own_allies = own_entry.get("allies", [])
+    target_allies = target_entry.get("allies", [])
+    if not isinstance(own_allies, list):
+        own_allies = []
+        own_entry["allies"] = own_allies
+    if not isinstance(target_allies, list):
+        target_allies = []
+        target_entry["allies"] = target_allies
+
+    had_alliance = str(target_owner_id) in own_allies or str(interaction.user.id) in target_allies
+    own_entry["allies"] = [ally_id for ally_id in own_allies if ally_id != str(target_owner_id)]
+    target_entry["allies"] = [ally_id for ally_id in target_allies if ally_id != str(interaction.user.id)]
+
+    incoming = ally_requests.get(str(interaction.user.id), [])
+    outgoing = ally_requests.get(str(target_owner_id), [])
+    if isinstance(incoming, list):
+        ally_requests[str(interaction.user.id)] = [requester for requester in incoming if requester != str(target_owner_id)]
+    if isinstance(outgoing, list):
+        ally_requests[str(target_owner_id)] = [requester for requester in outgoing if requester != str(interaction.user.id)]
+
+    save_faction_state(state)
+
+    if had_alliance:
+        await interaction.response.send_message(
+            f"L'alliance avec **{target_faction.get('name') or 'cette faction'}** a été rompue.",
+        )
+    else:
+        await interaction.response.send_message(
+            f"Aucune alliance active avec **{target_faction.get('name') or 'cette faction'}** n'a été trouvée.",
+        )
 
 
 @bot.tree.command(name="fleaderboard", description="Affiche le classement des factions.")

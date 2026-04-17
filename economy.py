@@ -286,16 +286,17 @@ def get_economy_stats() -> dict[str, dict[str, int]]:
 
 def load_faction_state() -> dict[str, dict[str, object]]:
     if not FACTIONS_FILE.exists():
-        return {"factions": {}, "invites": {}}
+        return {"factions": {}, "invites": {}, "ally_requests": {}}
 
     with FACTIONS_FILE.open("r", encoding="utf-8") as file:
         data = json.load(file)
 
     if not isinstance(data, dict):
-        return {"factions": {}, "invites": {}}
+        return {"factions": {}, "invites": {}, "ally_requests": {}}
 
     raw_factions = data.get("factions", {})
     raw_invites = data.get("invites", {})
+    raw_ally_requests = data.get("ally_requests", {})
 
     factions: dict[str, dict[str, object]] = {}
     if isinstance(raw_factions, dict):
@@ -306,7 +307,12 @@ def load_faction_state() -> dict[str, dict[str, object]]:
             name = str(raw_faction.get("name") or "").strip()
             tag = str(raw_faction.get("tag") or "").strip()
             created_at = str(raw_faction.get("created_at") or "")
+            raw_allies = raw_faction.get("allies", [])
             raw_members = raw_faction.get("members", {})
+
+            allies: list[str] = []
+            if isinstance(raw_allies, list):
+                allies = [str(ally_id) for ally_id in raw_allies]
 
             members: dict[str, dict[str, object]] = {}
             if isinstance(raw_members, dict):
@@ -329,6 +335,7 @@ def load_faction_state() -> dict[str, dict[str, object]]:
                 "name": name,
                 "tag": tag,
                 "created_at": created_at,
+                "allies": allies,
                 "members": members,
             }
 
@@ -337,7 +344,13 @@ def load_faction_state() -> dict[str, dict[str, object]]:
         for target_id, owner_id in raw_invites.items():
             invites[str(target_id)] = str(owner_id)
 
-    return {"factions": factions, "invites": invites}
+    ally_requests: dict[str, list[str]] = {}
+    if isinstance(raw_ally_requests, dict):
+        for target_owner_id, raw_requesters in raw_ally_requests.items():
+            if isinstance(raw_requesters, list):
+                ally_requests[str(target_owner_id)] = [str(requester_id) for requester_id in raw_requesters]
+
+    return {"factions": factions, "invites": invites, "ally_requests": ally_requests}
 
 
 def save_faction_state(data: dict[str, dict[str, object]]) -> None:
