@@ -112,6 +112,7 @@ EVENT_GUESS_REWARD = 550
 EVENT_MAX_GUESSES_PER_USER = 3
 EVENT_FAST_STRING_LENGTH = 15
 EVENT_TYPES = ("guess_number", "fast_string", "quick_math")
+EVENT_TIMEOUT = timedelta(seconds=45)
 LEVEL_XP_COOLDOWN = timedelta(seconds=60)
 LEVEL_XP_GAIN = (15, 25)
 LEVEL_REWARD = 300
@@ -2001,6 +2002,18 @@ class SukushiBot(discord.Client):
         event_type = state.get("type")
         if event_type not in EVENT_TYPES:
             return None
+        created_at_raw = state.get("created_at")
+        if not isinstance(created_at_raw, str):
+            save_event_state({})
+            return None
+        try:
+            created_at = datetime.fromisoformat(created_at_raw)
+        except ValueError:
+            save_event_state({})
+            return None
+        if created_at + EVENT_TIMEOUT <= datetime.now(timezone.utc):
+            save_event_state({})
+            return None
         answer = state.get("answer")
         if event_type == "guess_number":
             if not isinstance(answer, int):
@@ -2053,6 +2066,7 @@ class SukushiBot(discord.Client):
                 "warned_users": [],
             }
         )
+        asyncio.create_task(self.expire_event_later(message.id))
         return True, f"L'événement a été lancé dans {channel.mention}."
 
     async def start_guess_number_event(self, *, forced: bool = False) -> tuple[bool, str]:
@@ -2122,6 +2136,87 @@ class SukushiBot(discord.Client):
         )
         await channel.send(embed=embed)
         return True
+
+    async def clear_active_event(self, *, announce: bool = False, reason_text: str | None = None) -> bool:
+        state = load_event_state()
+        event_type = state.get("type")
+        if event_type not in EVENT_TYPES:
+            save_event_state({})
+            return False
+
+        channel = await self.get_event_channel()
+        event_message: discord.Message | None = None
+        message_id = state.get("message_id")
+        if channel is not None and isinstance(message_id, int):
+            try:
+                event_message = await channel.fetch_message(message_id)
+            except (discord.NotFound, discord.HTTPException):
+                event_message = None
+
+        save_event_state({})
+        if not announce:
+            return True
+
+        if channel is None:
+            return True
+
+        if event_message is not None:
+            expired_embed = make_embed(
+                "Événement expiré",
+                reason_text or "L'événement a expiré.",
+                color=discord.Color.red(),
+                footer="Sukushi bot | Événement",
+            )
+            try:
+                await event_message.edit(content=None, embed=expired_embed, attachments=[], view=None)
+            except discord.HTTPException:
+                event_message = None
+
+        embed = make_embed(
+            "Événement expiré",
+            reason_text or "L'événement a été fermé.",
+            color=discord.Color.red(),
+            footer="Sukushi bot | Événement",
+        )
+        expiry_message = await channel.send(embed=embed)
+        asyncio.create_task(self.delete_event_messages_later(event_message, expiry_message))
+        return True
+
+    async def expire_event_later(self, message_id: int) -> None:
+        try:
+            await asyncio.sleep(EVENT_TIMEOUT.total_seconds())
+        except asyncio.CancelledError:
+            return
+
+        state = load_event_state()
+        if state.get("message_id") != message_id:
+            return
+
+        await self.clear_active_event(
+            announce=True,
+            reason_text=(
+                f"Personne n'a trouvé la bonne réponse dans les **{int(EVENT_TIMEOUT.total_seconds())} secondes**."
+            ),
+        )
+
+    async def delete_event_messages_later(
+        self,
+        event_message: discord.Message | None,
+        expiry_message: discord.Message | None,
+        delay: float = 5.0,
+    ) -> None:
+        try:
+            await asyncio.sleep(delay)
+        except asyncio.CancelledError:
+            return
+
+        for message in (event_message, expiry_message):
+            if message is None:
+                continue
+            try:
+                await message.delete()
+            except (discord.NotFound, discord.HTTPException):
+                continue
 
     def consume_numeric_event_attempt(self, state: dict[str, object], user_id: int) -> bool:
         guesses = state.get("guesses")
@@ -4174,6 +4269,25 @@ async def jaillist(interaction: discord.Interaction) -> None:
 async def forceevent(interaction: discord.Interaction) -> None:
     success, message = await bot.start_random_event(forced=True)
     await interaction.response.send_message(message, ephemeral=True)
+
+
+@bot.tree.command(name="clearevent", description="Supprime l'événement actif.")
+@prison_block(allow_staff_bypass=True)
+@app_commands.default_permissions(manage_messages=True)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def clearevent(interaction: discord.Interaction) -> None:
+    cleared = await bot.clear_active_event()
+    if not cleared:
+        await interaction.response.send_message(
+            "Aucun événement actif à supprimer.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.send_message(
+        "L'événement actif a été supprimé.",
+        ephemeral=True,
+    )
 
 
 @bot.tree.command(name="lotterypanel", description="Envoie le panneau de la loterie.")
