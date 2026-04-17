@@ -1,4 +1,5 @@
 import asyncio
+import io
 import json
 import os
 import random
@@ -9,6 +10,7 @@ from pathlib import Path
 
 import discord
 from discord import app_commands
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from economy import (
     add_balance,
@@ -402,6 +404,65 @@ def generate_prison_challenge(length: int = JAIL_CHALLENGE_LENGTH) -> str:
     alphabet = string.ascii_letters + string.digits
     rng = random.SystemRandom()
     return "".join(rng.choice(alphabet) for _ in range(length))
+
+
+def split_prison_challenge_text(challenge: str) -> list[str]:
+    midpoint = (len(challenge) + 1) // 2
+    return [challenge[:midpoint], challenge[midpoint:]]
+
+
+def load_prison_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    for font_name in ("arial.ttf", "DejaVuSans.ttf", "calibri.ttf", "tahoma.ttf"):
+        try:
+            return ImageFont.truetype(font_name, size=size)
+        except OSError:
+            continue
+    return ImageFont.load_default()
+
+
+def build_prison_challenge_file(challenge: str) -> discord.File:
+    width = 920
+    height = 300
+    image = Image.new("RGB", (width, height), color=(248, 240, 234))
+    draw = ImageDraw.Draw(image)
+    rng = random.SystemRandom()
+
+    for _ in range(18):
+        x1 = rng.randint(0, width)
+        y1 = rng.randint(0, height)
+        x2 = rng.randint(0, width)
+        y2 = rng.randint(0, height)
+        color = (
+            rng.randint(110, 190),
+            rng.randint(110, 190),
+            rng.randint(110, 190),
+        )
+        draw.line((x1, y1, x2, y2), fill=color, width=rng.randint(1, 3))
+
+    for _ in range(250):
+        x = rng.randint(0, width - 1)
+        y = rng.randint(0, height - 1)
+        draw.point((x, y), fill=(rng.randint(90, 180), rng.randint(90, 180), rng.randint(90, 180)))
+
+    title_font = load_prison_font(28)
+    code_font = load_prison_font(40)
+    draw.rounded_rectangle((16, 16, width - 16, height - 16), radius=24, outline=(40, 40, 40), width=3)
+    draw.text((32, 28), "Retape exactement ce code dans le salon", font=title_font, fill=(35, 35, 35))
+
+    lines = split_prison_challenge_text(challenge)
+    y_positions = (110, 180)
+    for line, y in zip(lines, y_positions):
+        bbox = draw.textbbox((0, 0), line, font=code_font)
+        text_width = bbox[2] - bbox[0]
+        x = (width - text_width) // 2
+        draw.text((x + 2, y + 2), line, font=code_font, fill=(190, 190, 190))
+        draw.text((x, y), line, font=code_font, fill=(25, 25, 25))
+
+    image = image.filter(ImageFilter.GaussianBlur(radius=0.4))
+    buffer = io.BytesIO()
+    image.save(buffer, format="PNG")
+    buffer.seek(0)
+    return discord.File(buffer, filename="prison-code.png")
 
 
 def get_autorole_exclusive_group(role_id: int) -> set[int] | None:
@@ -1476,23 +1537,18 @@ class SukushiBot(discord.Client):
             "Test de sortie de prison",
             (
                 f"{member.mention}, tu es en prison pour **{reason}**.\n"
-                "Retape exactement la chaîne ci-dessous dans ce salon.\n"
-                "Respecte les majuscules et les minuscules.\n"
-                f"N'envoie pas la bonne réponse avant **{JAIL_MIN_SOLVE_SECONDS} secondes**, sinon tu seras considéré comme un tricheur."
+                "Regarde l'image ci-dessous et retape exactement le code dans ce salon.\n"
+                "Respecte parfaitement les majuscules et les minuscules."
             ),
             color=discord.Color.red(),
             footer="Sukushi bot | Prison",
         )
-        embed.add_field(name="Code", value=f"`{challenge}`", inline=False)
-        embed.add_field(
-            name="Règle anti-copie",
-            value="Si la bonne réponse arrive trop vite, le bot considère que tu as copié-collé.",
-            inline=False,
-        )
+        embed.set_image(url="attachment://prison-code.png")
         if penalty_text:
             embed.add_field(name="Sanction", value=penalty_text, inline=False)
 
-        await channel.send(content=member.mention, embed=embed)
+        challenge_file = build_prison_challenge_file(challenge)
+        await channel.send(content=member.mention, embed=embed, file=challenge_file)
         return record
 
     async def send_member_to_prison(self, member: discord.Member, *, reason: str) -> dict[str, object] | None:
@@ -1546,8 +1602,7 @@ class SukushiBot(discord.Client):
             new_balance = set_balance_value(message.author.id, current_balance // 2)
             await message.channel.send(
                 (
-                    f"{message.author.mention} bien essayé. Réponse correcte en moins de **{JAIL_MIN_SOLVE_SECONDS} secondes** : "
-                    "ça ressemble à un copier-coller.\n"
+                    f"{message.author.mention} triche détectée : copier-coller suspect.\n"
                     f"Tu perds **{current_balance - new_balance} Sukushi Dollars** et tu dois recommencer."
                 )
             )
@@ -3250,7 +3305,11 @@ async def mute(
     )
 
 
-"""Removed temporary /jail command.
+@bot.tree.command(name="jail", description="Envoie un membre en prison économique.")
+@prison_block(allow_staff_bypass=True)
+@app_commands.default_permissions(moderate_members=True)
+@app_commands.checks.has_permissions(moderate_members=True)
+async def jail(
     interaction: discord.Interaction,
     member: discord.Member,
     reason: str | None = None,
@@ -3258,14 +3317,14 @@ async def mute(
     moderator = get_moderator_member(interaction)
     if moderator is None or interaction.guild is None:
         await interaction.response.send_message(
-            "Cette commande doit ?tre utilis?e dans le serveur.",
+            "Cette commande doit être utilisée dans le serveur.",
         )
         return
 
     bot_member = get_bot_member(interaction.guild, bot.user)
     if bot_member is None:
         await interaction.response.send_message(
-            "Je n'arrive pas ? v?rifier ma hi?rarchie dans ce serveur.",
+            "Je n'arrive pas à vérifier ma hiérarchie dans ce serveur.",
         )
         return
 
@@ -3274,17 +3333,26 @@ async def mute(
         await interaction.response.send_message(message)
         return
 
-    release_at = imprison_user(member.id, TEST_JAIL_DURATION)
-    remaining = format_remaining_time(release_at - datetime.now(timezone.utc))
+    final_reason = reason or "Aucune raison fournie"
+    challenge_record = await bot.send_member_to_prison(member, reason=final_reason)
+    if challenge_record is None:
+        await interaction.response.send_message(
+            "Impossible de créer le salon de prison pour ce membre.",
+            ephemeral=True,
+        )
+        return
+
+    channel_id = challenge_record.get("channel_id")
+    channel_text = f"<#{channel_id}>" if isinstance(channel_id, int) else "salon introuvable"
     await interaction.response.send_message(
         (
-            f"{member.mention} a ?t? envoy? en prison pendant **{remaining}**.\n"
-            f"Raison : {reason or 'Aucune raison fournie'}."
+            f"{member.mention} a été envoyé en prison.\n"
+            f"Raison : {final_reason}\n"
+            f"Cellule : {channel_text}"
         )
     )
 
 
-"""
 @bot.tree.command(name="unmute", description="Remove a timeout from a member.")
 @prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(moderate_members=True)
@@ -3503,15 +3571,11 @@ async def clear(
 
 
 @bot.tree.command(name="jaillist", description="Affiche les membres actuellement en prison.")
-@prison_block(allow_staff_bypass=True)
-@app_commands.default_permissions(manage_messages=True)
-@app_commands.checks.has_permissions(manage_messages=True)
 async def jaillist(interaction: discord.Interaction) -> None:
     prisoners = get_all_prison_records()
     if not prisoners:
         await interaction.response.send_message(
             "Personne n'est actuellement en prison.",
-            ephemeral=True,
         )
         return
 
@@ -3534,7 +3598,7 @@ async def jaillist(interaction: discord.Interaction) -> None:
     )
     if len(lines) > 25:
         embed.add_field(name="Note", value=f"{len(lines) - 25} autre(s) membre(s) non affiché(s).", inline=False)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(name="lotterypanel", description="Envoie le panneau de la loterie.")
