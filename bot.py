@@ -565,20 +565,36 @@ def generate_fast_string_event_text(length: int = EVENT_FAST_STRING_LENGTH) -> s
 
 
 def generate_quick_math_event() -> tuple[str, str]:
-    operation = random.choice(("+", "-", "*"))
-    if operation == "+":
-        left = random.randint(10, 60)
-        right = random.randint(10, 60)
-        answer = left + right
-    elif operation == "-":
-        left = random.randint(30, 90)
-        right = random.randint(5, left)
-        answer = left - right
-    else:
+    pattern = random.choice(("paren_mul", "paren_div", "mix_div", "mix_mul"))
+
+    if pattern == "paren_mul":
         left = random.randint(2, 12)
-        right = random.randint(2, 12)
-        answer = left * right
-    return f"{left} {operation} {right}", str(answer)
+        middle = random.randint(2, 12)
+        right = random.randint(2, 8)
+        answer = (left + middle) * right
+        return f"({left} + {middle}) × {right}", str(answer)
+
+    if pattern == "paren_div":
+        divisor = random.randint(2, 10)
+        quotient = random.randint(2, 12)
+        extra = random.randint(2, 10)
+        dividend = divisor * quotient
+        answer = dividend // divisor + extra
+        return f"({dividend} ÷ {divisor}) + {extra}", str(answer)
+
+    if pattern == "mix_div":
+        left = random.randint(2, 10)
+        right = random.randint(2, 10)
+        divisor = random.randint(2, 8)
+        product = right * divisor
+        answer = left + (product // divisor)
+        return f"{left} + ({product} ÷ {divisor})", str(answer)
+
+    left = random.randint(2, 10)
+    middle = random.randint(2, 10)
+    right = random.randint(2, 10)
+    answer = left * middle - right
+    return f"({left} × {middle}) - {right}", str(answer)
 
 
 def build_lottery_embed(*, ends_at: datetime, participants_count: int) -> discord.Embed:
