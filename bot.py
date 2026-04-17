@@ -1645,6 +1645,487 @@ async def on_app_command_error(
     )
 
 
+async def run_balance_action(interaction: discord.Interaction) -> None:
+    ensure_minimum_balance(interaction.user.id)
+    amount = get_balance_value(interaction.user.id)
+    embed = make_embed(
+        "Balance",
+        f"{interaction.user.mention} possÃ¨de **{amount} Sukushi Dollars**.",
+        color=SUKUSHI_PINK,
+        footer="Sukushi bot | Ã‰conomie",
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+async def run_pay_action(
+    interaction: discord.Interaction,
+    cible: discord.Member,
+    montant: int,
+) -> None:
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(
+            "Cette commande doit Ãªtre utilisÃ©e dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    payer = interaction.user
+    if cible.id == payer.id:
+        await interaction.response.send_message(
+            "Tu ne peux pas te payer toi-mÃªme.",
+            ephemeral=True,
+        )
+        return
+
+    if cible.bot:
+        await interaction.response.send_message(
+            "Tu ne peux pas payer un bot.",
+            ephemeral=True,
+        )
+        return
+
+    ensure_minimum_balance(payer.id)
+    ensure_minimum_balance(cible.id)
+
+    payer_balance = get_balance_value(payer.id)
+    if montant > payer_balance:
+        await interaction.response.send_message(
+            f"Tu n'as pas assez d'argent. Solde actuel : **{payer_balance} Sukushi Dollars**.",
+            ephemeral=True,
+        )
+        return
+
+    new_payer_balance = set_balance_value(payer.id, payer_balance - montant)
+    new_target_balance = add_balance(cible.id, montant)
+    embed = make_embed(
+        "Paiement envoyÃ©",
+        (
+            f"{payer.mention} a envoyÃ© **{montant} Sukushi Dollars** Ã  {cible.mention}.\n"
+            f"Ton nouveau solde : **{new_payer_balance} Sukushi Dollars**.\n"
+            f"Nouveau solde de la cible : **{new_target_balance} Sukushi Dollars**."
+        ),
+        color=discord.Color.green(),
+        footer="Sukushi bot | Ã‰conomie",
+    )
+    await interaction.response.send_message(content=cible.mention, embed=embed)
+
+
+async def run_leaderboard_action(interaction: discord.Interaction) -> None:
+    top_balances = get_top_balances(10)
+    if not top_balances:
+        await interaction.response.send_message(
+            "Aucune donnÃ©e Ã©conomique disponible pour le moment.",
+            ephemeral=True,
+        )
+        return
+
+    lines: list[str] = []
+    for index, (user_id, amount) in enumerate(top_balances, start=1):
+        member = interaction.guild.get_member(user_id) if interaction.guild else None
+        user_label = member.mention if member else f"<@{user_id}>"
+        lines.append(f"**{index}.** {user_label} â€” **{amount} Sukushi Dollars**")
+
+    embed = make_embed(
+        "Leaderboard",
+        "\n".join(lines),
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Richesse",
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+async def run_daily_action(interaction: discord.Interaction) -> None:
+    ensure_minimum_balance(interaction.user.id)
+    remaining = get_cooldown_remaining(DAILY_FILE, interaction.user.id, DAILY_COOLDOWN)
+    if remaining is not None:
+        await interaction.response.send_message(
+            f"Ton `/daily` est en cooldown pendant encore **{format_remaining_time(remaining)}**.",
+            ephemeral=True,
+        )
+        return
+
+    update_cooldown(DAILY_FILE, interaction.user.id)
+    new_balance = add_balance(interaction.user.id, DAILY_REWARD)
+    embed = make_embed(
+        "Daily rÃ©cupÃ©rÃ©",
+        (
+            f"Tu as reÃ§u **{DAILY_REWARD} Sukushi Dollars**.\n"
+            f"Nouveau solde : **{new_balance} Sukushi Dollars**."
+        ),
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Daily",
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+async def run_getjob_action(interaction: discord.Interaction) -> None:
+    ensure_minimum_balance(interaction.user.id)
+    current_job = get_job(interaction.user.id)
+    if current_job is not None:
+        await interaction.response.send_message(
+            f"Tu travailles dÃ©jÃ  comme **{JOB_OPTIONS.get(current_job, current_job)}**.",
+            ephemeral=True,
+        )
+        return
+
+    view = JobSelectView(interaction.user)
+    embed = make_embed(
+        "Choisis ton mÃ©tier criminel",
+        (
+            "Choisis un mÃ©tier avec soin.\n"
+            "Il est permanent pour le moment, donc il n'y a aucun moyen d'en changer pour l'instant."
+        ),
+        color=SUKUSHI_PINK,
+        footer="Sukushi bot | MÃ©tiers",
+    )
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+async def run_changejob_action(interaction: discord.Interaction) -> None:
+    ensure_minimum_balance(interaction.user.id)
+    current_job = get_job(interaction.user.id)
+    if current_job is None:
+        await interaction.response.send_message(
+            "Tu n'as pas encore de mÃ©tier. Utilise `/getjob` d'abord.",
+            ephemeral=True,
+        )
+        return
+
+    remaining = get_cooldown_remaining(CHANGEJOB_FILE, interaction.user.id, CHANGEJOB_COOLDOWN)
+    if remaining is not None:
+        await interaction.response.send_message(
+            f"Tu pourras rechanger de mÃ©tier dans **{format_remaining_time(remaining)}**.",
+            ephemeral=True,
+        )
+        return
+
+    view = JobSelectView(interaction.user, allow_change=True)
+    embed = make_embed(
+        "Changer de mÃ©tier",
+        (
+            f"MÃ©tier actuel : **{JOB_OPTIONS.get(current_job, current_job)}**\n"
+            "Choisis ton nouveau mÃ©tier. Tu ne pourras plus en changer avant 24h."
+        ),
+        color=SUKUSHI_PINK,
+        footer="Sukushi bot | MÃ©tiers",
+    )
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+async def run_work_action(interaction: discord.Interaction) -> None:
+    ensure_minimum_balance(interaction.user.id)
+    job_key = get_job(interaction.user.id)
+    if job_key is None:
+        await interaction.response.send_message(
+            "Tu n'as pas encore de mÃ©tier. Utilise `/getjob` d'abord.",
+            ephemeral=True,
+        )
+        return
+
+    remaining = get_cooldown_remaining(WORK_FILE, interaction.user.id, WORK_COOLDOWN)
+    if remaining is not None:
+        await interaction.response.send_message(
+            f"Tu as dÃ©jÃ  travaillÃ© aujourd'hui. Cooldown restant : **{format_remaining_time(remaining)}**.",
+            ephemeral=True,
+        )
+        return
+
+    view = WorkMinigameView(interaction.user, job_key)
+    await interaction.response.send_message(embed=view.build_embed(), view=view)
+    view.message = await interaction.original_response()
+
+
+async def run_attack_action(
+    interaction: discord.Interaction,
+    cible: discord.Member,
+) -> None:
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(
+            "Cette commande doit Ãªtre utilisÃ©e dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    attacker = interaction.user
+    if cible.id == attacker.id:
+        await interaction.response.send_message(
+            "Tu ne peux pas t'attaquer toi-mÃªme.",
+            ephemeral=True,
+        )
+        return
+
+    if cible.bot:
+        await interaction.response.send_message(
+            "Tu ne peux pas attaquer un bot.",
+            ephemeral=True,
+        )
+        return
+
+    if attacker.id in ACTIVE_ATTACK_USERS or cible.id in ACTIVE_ATTACK_USERS:
+        await interaction.response.send_message(
+            "Un de ces joueurs est dÃ©jÃ  dans un combat. Attends la fin du duel en cours.",
+            ephemeral=True,
+        )
+        return
+
+    target_prison = get_prison_release(cible.id)
+    if target_prison is not None:
+        remaining = format_remaining_time(target_prison - datetime.now(timezone.utc))
+        await interaction.response.send_message(
+            f"{cible.mention} est dÃ©jÃ  en prison pendant encore **{remaining}**.",
+            ephemeral=True,
+        )
+        return
+
+    ensure_minimum_balance(attacker.id)
+    ensure_minimum_balance(cible.id)
+
+    global_cooldown_remaining = get_cooldown_remaining(
+        ATTACK_FILE,
+        attacker.id,
+        GLOBAL_ATTACK_COOLDOWN,
+    )
+    if global_cooldown_remaining is not None:
+        await interaction.response.send_message(
+            f"Tu dois attendre **{format_remaining_time(global_cooldown_remaining)}** avant de relancer une attaque.",
+            ephemeral=True,
+        )
+        return
+
+    cooldown_remaining = get_pair_cooldown_remaining(
+        ATTACK_FILE,
+        attacker.id,
+        cible.id,
+        ATTACK_COOLDOWN,
+    )
+    if cooldown_remaining is not None:
+        await interaction.response.send_message(
+            f"Tu dois attendre **{format_remaining_time(cooldown_remaining)}** avant de rÃ©attaquer {cible.mention}.",
+            ephemeral=True,
+        )
+        return
+
+    if get_balance_value(attacker.id) <= 0 and get_balance_value(cible.id) <= 0:
+        await interaction.response.send_message(
+            "Aucun de vous deux n'a assez d'argent pour que cette attaque serve Ã  quelque chose.",
+            ephemeral=True,
+        )
+        return
+
+    update_cooldown(ATTACK_FILE, attacker.id)
+    ACTIVE_ATTACK_USERS.add(attacker.id)
+    ACTIVE_ATTACK_USERS.add(cible.id)
+    view = AttackView(attacker, cible)
+    await interaction.response.send_message(
+        content=cible.mention,
+        embed=view.build_embed(),
+        view=view,
+    )
+    view.message = await interaction.original_response()
+
+
+async def run_blackjack_action(
+    interaction: discord.Interaction,
+    mise: int,
+) -> None:
+    ensure_minimum_balance(interaction.user.id)
+    balance_value = get_balance_value(interaction.user.id)
+    if mise > balance_value:
+        await interaction.response.send_message(
+            f"Tu n'as pas assez d'argent. Solde actuel : **{balance_value} Sukushi Dollars**.",
+            ephemeral=True,
+        )
+        return
+
+    view = BlackjackView(interaction.user, mise)
+    await view.start_game(interaction)
+
+
+async def ensure_panel_access(interaction: discord.Interaction) -> bool:
+    if not await ensure_not_in_prison(interaction):
+        return False
+    if not await ensure_not_ecobanned(interaction):
+        return False
+    return True
+
+
+def build_panel_embed() -> discord.Embed:
+    embed = make_embed(
+        "Panel Ã‰conomie",
+        "Choisis une action ci-dessous pour gÃ©rer ton aventure Sukushi sans spammer les commandes.",
+        color=SUKUSHI_PINK,
+        footer="Sukushi bot | Panel",
+    )
+    embed.add_field(name="Infos rapides", value="`Solde`  `Daily`  `Classement`", inline=False)
+    embed.add_field(name="Actions", value="`Travail`  `Blackjack`  `Payer`  `Attaquer`", inline=False)
+    embed.add_field(name="MÃ©tier", value="`Choisir`  `Changer`", inline=False)
+    return embed
+
+
+class OwnerRestrictedView(discord.ui.View):
+    def __init__(self, owner_id: int, *, timeout: float = 300) -> None:
+        super().__init__(timeout=timeout)
+        self.owner_id = owner_id
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Ce panel n'est pas pour toi.", ephemeral=True)
+            return False
+        return True
+
+
+class AttackTargetSelect(discord.ui.UserSelect):
+    def __init__(self, owner_id: int) -> None:
+        super().__init__(placeholder="Choisis la cible Ã  attaquer", min_values=1, max_values=1)
+        self.owner_id = owner_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        target = self.values[0]
+        if not isinstance(target, discord.Member):
+            await interaction.response.send_message("Impossible de rÃ©cupÃ©rer ce membre.", ephemeral=True)
+            return
+        await run_attack_action(interaction, target)
+
+
+class AttackTargetView(OwnerRestrictedView):
+    def __init__(self, owner_id: int) -> None:
+        super().__init__(owner_id, timeout=120)
+        self.add_item(AttackTargetSelect(owner_id))
+
+
+class PayAmountModal(discord.ui.Modal, title="Envoyer de l'argent"):
+    montant = discord.ui.TextInput(label="Montant", placeholder="Ex: 2500", required=True, max_length=7)
+
+    def __init__(self, target: discord.Member) -> None:
+        super().__init__()
+        self.target = target
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        raw_value = str(self.montant).strip()
+        if not raw_value.isdigit():
+            await interaction.response.send_message("Le montant doit Ãªtre un nombre entier positif.", ephemeral=True)
+            return
+        amount = int(raw_value)
+        if amount <= 0:
+            await interaction.response.send_message("Le montant doit Ãªtre supÃ©rieur Ã  0.", ephemeral=True)
+            return
+        await run_pay_action(interaction, self.target, amount)
+
+
+class PayTargetSelect(discord.ui.UserSelect):
+    def __init__(self, owner_id: int) -> None:
+        super().__init__(placeholder="Choisis la personne Ã  payer", min_values=1, max_values=1)
+        self.owner_id = owner_id
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        target = self.values[0]
+        if not isinstance(target, discord.Member):
+            await interaction.response.send_message("Impossible de rÃ©cupÃ©rer ce membre.", ephemeral=True)
+            return
+        await interaction.response.send_modal(PayAmountModal(target))
+
+
+class PayTargetView(OwnerRestrictedView):
+    def __init__(self, owner_id: int) -> None:
+        super().__init__(owner_id, timeout=120)
+        self.add_item(PayTargetSelect(owner_id))
+
+
+class BlackjackBetModal(discord.ui.Modal, title="Lancer une partie de blackjack"):
+    mise = discord.ui.TextInput(label="Mise", placeholder="Ex: 500", required=True, max_length=7)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        raw_value = str(self.mise).strip()
+        if not raw_value.isdigit():
+            await interaction.response.send_message("La mise doit Ãªtre un nombre entier positif.", ephemeral=True)
+            return
+        amount = int(raw_value)
+        if amount <= 0:
+            await interaction.response.send_message("La mise doit Ãªtre supÃ©rieure Ã  0.", ephemeral=True)
+            return
+        await run_blackjack_action(interaction, amount)
+
+
+class PanelView(OwnerRestrictedView):
+    def __init__(self, owner_id: int) -> None:
+        super().__init__(owner_id)
+
+    @discord.ui.button(label="Solde", style=discord.ButtonStyle.secondary, emoji="💰", row=0)
+    async def balance_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await run_balance_action(interaction)
+
+    @discord.ui.button(label="Daily", style=discord.ButtonStyle.success, emoji="🪙", row=0)
+    async def daily_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await run_daily_action(interaction)
+
+    @discord.ui.button(label="Classement", style=discord.ButtonStyle.secondary, emoji="🏆", row=0)
+    async def leaderboard_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await run_leaderboard_action(interaction)
+
+    @discord.ui.button(label="Travail", style=discord.ButtonStyle.primary, emoji="💼", row=1)
+    async def work_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await run_work_action(interaction)
+
+    @discord.ui.button(label="Blackjack", style=discord.ButtonStyle.primary, emoji="🃏", row=1)
+    async def blackjack_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await interaction.response.send_modal(BlackjackBetModal())
+
+    @discord.ui.button(label="Payer", style=discord.ButtonStyle.primary, emoji="💸", row=1)
+    async def pay_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await interaction.response.send_message(
+            "Choisis la personne Ã  payer.",
+            ephemeral=True,
+            view=PayTargetView(self.owner_id),
+        )
+
+    @discord.ui.button(label="Attaquer", style=discord.ButtonStyle.danger, emoji="⚔️", row=2)
+    async def attack_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await interaction.response.send_message(
+            "Choisis la cible Ã  attaquer.",
+            ephemeral=True,
+            view=AttackTargetView(self.owner_id),
+        )
+
+    @discord.ui.button(label="Choisir mÃ©tier", style=discord.ButtonStyle.secondary, emoji="🕵️", row=2)
+    async def getjob_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await run_getjob_action(interaction)
+
+    @discord.ui.button(label="Changer mÃ©tier", style=discord.ButtonStyle.secondary, emoji="🔁", row=2)
+    async def changejob_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        if not await ensure_panel_access(interaction):
+            return
+        await run_changejob_action(interaction)
+
+    @discord.ui.button(label="Fermer", style=discord.ButtonStyle.secondary, emoji="✖️", row=3)
+    async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+        self.stop()
+        await interaction.response.edit_message(content="Panel fermÃ©.", embed=None, view=None)
+
+
 @bot.tree.command(name="ping", description="Check if sukushi bot is online.")
 @prison_block()
 async def ping(interaction: discord.Interaction) -> None:
@@ -1656,6 +2137,17 @@ async def ping(interaction: discord.Interaction) -> None:
         footer=f"Demandé par {interaction.user.display_name}",
     )
     await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="panel", description="Ouvre un panel interactif pour l'economie.")
+@prison_block()
+@economy_block()
+async def panel(interaction: discord.Interaction) -> None:
+    await interaction.response.send_message(
+        embed=build_panel_embed(),
+        view=PanelView(interaction.user.id),
+        ephemeral=True,
+    )
 
 
 @bot.tree.command(name="balance", description="Show your Sukushi Dollars balance.")
