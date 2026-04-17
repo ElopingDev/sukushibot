@@ -5064,6 +5064,53 @@ async def faction(interaction: discord.Interaction) -> None:
     )
 
 
+@bot.tree.command(name="fleaderboard", description="Affiche le classement des factions.")
+async def fleaderboard(interaction: discord.Interaction) -> None:
+    factions = get_all_factions()
+    if not factions:
+        await interaction.response.send_message(
+            "Aucune faction n'existe pour le moment.",
+        )
+        return
+
+    economy_data = load_economy()
+    ranked_factions: list[tuple[int, dict[str, object], int, int]] = []
+    for owner_id, faction in factions:
+        members = faction.get("members", {})
+        if not isinstance(members, dict):
+            continue
+
+        member_ids: list[int] = []
+        total_money = 0
+        for member_id in members.keys():
+            try:
+                parsed_member_id = int(member_id)
+            except ValueError:
+                continue
+            member_ids.append(parsed_member_id)
+            total_money += int(economy_data.get(str(parsed_member_id), 0))
+
+        ranked_factions.append((owner_id, faction, len(member_ids), total_money))
+
+    ranked_factions.sort(key=lambda item: item[3], reverse=True)
+
+    lines: list[str] = []
+    for index, (_, faction, member_count, total_money) in enumerate(ranked_factions[:10], start=1):
+        name = str(faction.get("name") or "Faction inconnue")
+        tag = str(faction.get("tag") or "-")
+        lines.append(
+            f"**{index}.** {name} | Tag: **{tag}** | Membres: **{member_count}** | Fortune: **{total_money} SD**"
+        )
+
+    embed = make_embed(
+        "Faction Leaderboard",
+        "\n".join(lines),
+        color=discord.Color.gold(),
+        footer="Sukushi bot | Factions",
+    )
+    await interaction.response.send_message(embed=embed)
+
+
 @bot.tree.command(name="mute", description="Timeout a member for a set duration.")
 @prison_block(allow_staff_bypass=True)
 @app_commands.default_permissions(moderate_members=True)
