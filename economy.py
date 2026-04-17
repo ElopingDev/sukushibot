@@ -15,6 +15,7 @@ ECOBAN_FILE = Path("ecoban.json")
 EVENT_FILE = Path("event.json")
 SLOTS_FILE = Path("slots.json")
 ECONOMY_STATS_FILE = Path("economy_stats.json")
+FACTIONS_FILE = Path("factions.json")
 DEFAULT_SLOTS_POT = 0
 
 
@@ -281,6 +282,142 @@ def record_economy_stat(source: str, amount: int) -> None:
 
 def get_economy_stats() -> dict[str, dict[str, int]]:
     return load_economy_stats()
+
+
+def load_faction_state() -> dict[str, dict[str, object]]:
+    if not FACTIONS_FILE.exists():
+        return {"factions": {}, "invites": {}}
+
+    with FACTIONS_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    if not isinstance(data, dict):
+        return {"factions": {}, "invites": {}}
+
+    raw_factions = data.get("factions", {})
+    raw_invites = data.get("invites", {})
+
+    factions: dict[str, dict[str, object]] = {}
+    if isinstance(raw_factions, dict):
+        for owner_id, raw_faction in raw_factions.items():
+            if not isinstance(raw_faction, dict):
+                continue
+
+            name = str(raw_faction.get("name") or "").strip()
+            tag = str(raw_faction.get("tag") or "").strip()
+            created_at = str(raw_faction.get("created_at") or "")
+            raw_members = raw_faction.get("members", {})
+
+            members: dict[str, dict[str, object]] = {}
+            if isinstance(raw_members, dict):
+                for member_id, raw_member in raw_members.items():
+                    if isinstance(raw_member, dict):
+                        joined_at = str(raw_member.get("joined_at") or "")
+                        base_nick = raw_member.get("base_nick")
+                    else:
+                        joined_at = ""
+                        base_nick = None
+                    members[str(member_id)] = {
+                        "joined_at": joined_at,
+                        "base_nick": str(base_nick) if isinstance(base_nick, str) else None,
+                    }
+            elif isinstance(raw_members, list):
+                for member_id in raw_members:
+                    members[str(member_id)] = {"joined_at": "", "base_nick": None}
+
+            factions[str(owner_id)] = {
+                "name": name,
+                "tag": tag,
+                "created_at": created_at,
+                "members": members,
+            }
+
+    invites: dict[str, str] = {}
+    if isinstance(raw_invites, dict):
+        for target_id, owner_id in raw_invites.items():
+            invites[str(target_id)] = str(owner_id)
+
+    return {"factions": factions, "invites": invites}
+
+
+def save_faction_state(data: dict[str, dict[str, object]]) -> None:
+    with FACTIONS_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
+
+
+def get_faction_by_owner(owner_id: int) -> dict[str, object] | None:
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        return None
+    faction = factions.get(str(owner_id))
+    return faction if isinstance(faction, dict) else None
+
+
+def get_faction_for_member(user_id: int) -> tuple[int, dict[str, object]] | None:
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        return None
+
+    user_key = str(user_id)
+    for owner_id, faction in factions.items():
+        if not isinstance(faction, dict):
+            continue
+        members = faction.get("members", {})
+        if isinstance(members, dict) and user_key in members:
+            try:
+                return int(owner_id), faction
+            except ValueError:
+                continue
+    return None
+
+
+def get_all_factions() -> list[tuple[int, dict[str, object]]]:
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        return []
+
+    result: list[tuple[int, dict[str, object]]] = []
+    for owner_id, faction in factions.items():
+        if not isinstance(faction, dict):
+            continue
+        try:
+            result.append((int(owner_id), faction))
+        except ValueError:
+            continue
+    return result
+
+
+def get_faction_invite(user_id: int) -> int | None:
+    state = load_faction_state()
+    invites = state.get("invites", {})
+    if not isinstance(invites, dict):
+        return None
+    owner_id = invites.get(str(user_id))
+    try:
+        return int(owner_id) if owner_id is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def set_faction_invite(user_id: int, owner_id: int) -> None:
+    state = load_faction_state()
+    invites = state.setdefault("invites", {})
+    if not isinstance(invites, dict):
+        invites = {}
+        state["invites"] = invites
+    invites[str(user_id)] = str(owner_id)
+    save_faction_state(state)
+
+
+def clear_faction_invite(user_id: int) -> None:
+    state = load_faction_state()
+    invites = state.get("invites", {})
+    if isinstance(invites, dict):
+        invites.pop(str(user_id), None)
+        save_faction_state(state)
 
 
 def reset_cooldown_files() -> None:

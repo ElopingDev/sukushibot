@@ -15,14 +15,20 @@ from PIL import Image, ImageDraw, ImageFont
 from economy import (
     add_balance,
     add_ecoban,
+    add_slots_pot,
+    clear_faction_invite,
     ensure_minimum_balance,
+    get_all_factions,
     get_all_prison_records,
     get_balance_value,
     get_cooldown_remaining,
+    get_faction_by_owner,
+    get_faction_for_member,
+    get_faction_invite,
+    get_economy_stats,
     get_job,
     get_pair_cooldown_remaining,
     get_prison_record,
-    get_economy_stats,
     get_slots_pot,
     get_top_balances,
     imprison_user,
@@ -31,6 +37,7 @@ from economy import (
     load_economy,
     load_economy_meta,
     load_event_state,
+    load_faction_state,
     load_lottery_state,
     load_json_dict,
     remove_prison_record,
@@ -42,12 +49,13 @@ from economy import (
     save_economy,
     save_economy_meta,
     save_event_state,
+    save_faction_state,
     save_lottery_state,
     save_json_dict,
+    set_faction_invite,
     set_prison_record,
     set_balance_value,
     set_job,
-    add_slots_pot,
     update_cooldown,
     update_pair_cooldown,
 )
@@ -191,6 +199,7 @@ ECONOMY_STAT_LABELS = {
     "staff_give": "Staff give",
     "staff_take": "Staff take",
 }
+FACTION_TAG_PATTERN = re.compile(r"^[A-Za-z0-9]{1,4}$")
 ATTACK_STARTING_HP = 100
 ATTACK_PLAYER_HIT_CHANCE = 0.78
 ATTACK_AI_HIT_CHANCE = 0.55
@@ -388,6 +397,85 @@ def get_custom_emoji_text(
 
 def get_economy_stat_label(source: str) -> str:
     return ECONOMY_STAT_LABELS.get(source, source.replace("_", " ").title())
+
+
+def normalize_faction_tag(tag: str) -> str:
+    return tag.strip().upper()
+
+
+def strip_faction_suffix(name: str, tag: str | None) -> str:
+    if not tag:
+        return name
+    suffix = f" [{tag}]"
+    return name[: -len(suffix)].rstrip() if name.endswith(suffix) else name
+
+
+def get_faction_member_count(faction: dict[str, object]) -> int:
+    members = faction.get("members", {})
+    return len(members) if isinstance(members, dict) else 0
+
+
+async def sync_member_faction_nickname(
+    member: discord.Member,
+    *,
+    old_tag: str | None = None,
+    new_tag: str | None = None,
+    base_nick: str | None = None,
+    reason: str,
+) -> bool:
+    source_name = base_nick if base_nick is not None else (member.nick or member.display_name)
+    clean_name = strip_faction_suffix(source_name, old_tag)
+
+    if new_tag:
+        suffix = f" [{new_tag}]"
+        max_base_length = max(1, 32 - len(suffix))
+        clean_name = clean_name[:max_base_length].rstrip() or member.display_name[:max_base_length]
+        target_nick = f"{clean_name}{suffix}"
+    else:
+        target_nick = clean_name[:32] if base_nick is not None else None
+
+    if member.nick == target_nick:
+        return True
+
+    try:
+        await member.edit(nick=target_nick, reason=reason)
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+    return True
+
+
+def build_faction_embed(
+    guild: discord.Guild | None,
+    *,
+    owner_id: int,
+    faction: dict[str, object],
+) -> discord.Embed:
+    name = str(faction.get("name") or "Faction")
+    tag = str(faction.get("tag") or "Aucun")
+    members = faction.get("members", {})
+    member_ids = list(members.keys()) if isinstance(members, dict) else []
+    member_mentions = [f"<@{member_id}>" for member_id in member_ids[:15]]
+    owner_member = guild.get_member(owner_id) if guild is not None else None
+    embed = make_embed(
+        f"Faction | {name}",
+        f"Tag actuel : **{tag}**",
+        color=SUKUSHI_PINK,
+        footer="Sukushi bot | Factions",
+    )
+    embed.add_field(
+        name="Chef",
+        value=owner_member.mention if owner_member is not None else f"<@{owner_id}>",
+        inline=True,
+    )
+    embed.add_field(name="Membres", value=f"**{len(member_ids)}**", inline=True)
+    embed.add_field(
+        name="Liste",
+        value="\n".join(member_mentions) if member_mentions else "Aucun membre.",
+        inline=False,
+    )
+    if len(member_ids) > 15:
+        embed.add_field(name="Note", value=f"{len(member_ids) - 15} autre(s) membre(s) non affiché(s).", inline=False)
+    return embed
 
 
 def get_role_by_id(guild: discord.Guild | None, role_id: int) -> discord.Role | None:
@@ -4489,6 +4577,535 @@ async def mines(
     bombes: app_commands.Range[int, 4, 5],
 ) -> None:
     await run_mines_action(interaction, mise, bombes)
+
+
+@bot.tree.command(name="createfaction", description="Crée ta propre faction.")
+async def createfaction(
+    interaction: discord.Interaction,
+    nom: app_commands.Range[str, 1, 32],
+) -> None:
+    if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    if get_faction_for_member(interaction.user.id) is not None:
+        await interaction.response.send_message(
+            "Tu fais déjà partie d'une faction.",
+            ephemeral=True,
+        )
+        return
+
+    faction_name = nom.strip()
+    if not faction_name:
+        await interaction.response.send_message(
+            "Le nom de la faction ne peut pas être vide.",
+            ephemeral=True,
+        )
+        return
+
+    for _, faction in get_all_factions():
+        existing_name = str(faction.get("name") or "")
+        if existing_name.casefold() == faction_name.casefold():
+            await interaction.response.send_message(
+                "Une faction avec ce nom existe déjà.",
+                ephemeral=True,
+            )
+            return
+
+    state = load_faction_state()
+    factions = state.setdefault("factions", {})
+    if not isinstance(factions, dict):
+        factions = {}
+        state["factions"] = factions
+
+    factions[str(interaction.user.id)] = {
+        "name": faction_name,
+        "tag": "",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "members": {
+            str(interaction.user.id): {
+                "joined_at": datetime.now(timezone.utc).isoformat(),
+                "base_nick": interaction.user.nick,
+            }
+        },
+    }
+    save_faction_state(state)
+
+    await interaction.response.send_message(
+        (
+            f"Ta faction **{faction_name}** a été créée.\n"
+            "Utilise `/setfactiontag` pour définir un tag, puis `/invitefaction` pour recruter."
+        ),
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="setfactiontag", description="Définit le tag de ta faction.")
+async def setfactiontag(
+    interaction: discord.Interaction,
+    tag: str,
+) -> None:
+    if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    faction = get_faction_by_owner(interaction.user.id)
+    if faction is None:
+        await interaction.response.send_message(
+            "Tu dois être chef d'une faction pour définir un tag.",
+            ephemeral=True,
+        )
+        return
+
+    normalized_tag = normalize_faction_tag(tag)
+    if not FACTION_TAG_PATTERN.fullmatch(normalized_tag):
+        await interaction.response.send_message(
+            "Le tag doit faire 1 à 4 caractères, sans espace, avec uniquement des lettres ou chiffres.",
+            ephemeral=True,
+        )
+        return
+
+    for owner_id, other_faction in get_all_factions():
+        if owner_id == interaction.user.id:
+            continue
+        if normalize_faction_tag(str(other_faction.get("tag") or "")) == normalized_tag:
+            await interaction.response.send_message(
+                "Ce tag est déjà utilisé par une autre faction.",
+                ephemeral=True,
+            )
+            return
+
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        await interaction.response.send_message(
+            "Impossible de mettre à jour la faction pour le moment.",
+            ephemeral=True,
+        )
+        return
+
+    faction_entry = factions.get(str(interaction.user.id))
+    if not isinstance(faction_entry, dict):
+        await interaction.response.send_message(
+            "Faction introuvable.",
+            ephemeral=True,
+        )
+        return
+
+    old_tag = str(faction_entry.get("tag") or "")
+    faction_entry["tag"] = normalized_tag
+    save_faction_state(state)
+
+    members = faction_entry.get("members", {})
+    updated_members = 0
+    failed_members = 0
+    if isinstance(members, dict):
+        for member_id, metadata in members.items():
+            try:
+                target_id = int(member_id)
+            except ValueError:
+                continue
+            member = interaction.guild.get_member(target_id)
+            if member is None:
+                continue
+            base_nick = metadata.get("base_nick") if isinstance(metadata, dict) else None
+            success = await sync_member_faction_nickname(
+                member,
+                old_tag=old_tag or None,
+                new_tag=normalized_tag,
+                base_nick=base_nick if isinstance(base_nick, str) else None,
+                reason=f"Tag de faction défini par {interaction.user}",
+            )
+            if success:
+                updated_members += 1
+            else:
+                failed_members += 1
+
+    note = ""
+    if failed_members > 0:
+        note = f"\n{failed_members} membre(s) n'ont pas pu être renommé(s) automatiquement."
+
+    await interaction.response.send_message(
+        (
+            f"Le tag de la faction est maintenant **{normalized_tag}**.\n"
+            f"Tags synchronisés pour **{updated_members}** membre(s).{note}"
+        ),
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="invitefaction", description="Invite un membre dans ta faction.")
+async def invitefaction(
+    interaction: discord.Interaction,
+    membre: discord.Member,
+) -> None:
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    faction = get_faction_by_owner(interaction.user.id)
+    if faction is None:
+        await interaction.response.send_message(
+            "Tu dois être chef d'une faction pour inviter quelqu'un.",
+            ephemeral=True,
+        )
+        return
+
+    if membre.bot:
+        await interaction.response.send_message(
+            "Tu ne peux pas inviter un bot.",
+            ephemeral=True,
+        )
+        return
+
+    if membre.id == interaction.user.id:
+        await interaction.response.send_message(
+            "Tu es déjà dans ta propre faction.",
+            ephemeral=True,
+        )
+        return
+
+    if get_faction_for_member(membre.id) is not None:
+        await interaction.response.send_message(
+            f"{membre.mention} fait déjà partie d'une faction.",
+            ephemeral=True,
+        )
+        return
+
+    set_faction_invite(membre.id, interaction.user.id)
+    await interaction.response.send_message(
+        (
+            f"{membre.mention} a reçu une invitation pour rejoindre **{faction.get('name') or 'ta faction'}**.\n"
+            "La personne doit utiliser `/joinfaction` pour accepter."
+        ),
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="joinfaction", description="Accepte ton invitation de faction.")
+async def joinfaction(interaction: discord.Interaction) -> None:
+    if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    if get_faction_for_member(interaction.user.id) is not None:
+        await interaction.response.send_message(
+            "Tu fais déjà partie d'une faction.",
+            ephemeral=True,
+        )
+        return
+
+    owner_id = get_faction_invite(interaction.user.id)
+    if owner_id is None:
+        await interaction.response.send_message(
+            "Tu n'as aucune invitation de faction en attente.",
+            ephemeral=True,
+        )
+        return
+
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    invites = state.get("invites", {})
+    if not isinstance(factions, dict) or not isinstance(invites, dict):
+        await interaction.response.send_message(
+            "Impossible de rejoindre une faction pour le moment.",
+            ephemeral=True,
+        )
+        return
+
+    faction = factions.get(str(owner_id))
+    if not isinstance(faction, dict):
+        invites.pop(str(interaction.user.id), None)
+        save_faction_state(state)
+        await interaction.response.send_message(
+            "Cette invitation n'est plus valide.",
+            ephemeral=True,
+        )
+        return
+
+    members = faction.get("members", {})
+    if not isinstance(members, dict):
+        members = {}
+        faction["members"] = members
+
+    members[str(interaction.user.id)] = {
+        "joined_at": datetime.now(timezone.utc).isoformat(),
+        "base_nick": interaction.user.nick,
+    }
+    invites.pop(str(interaction.user.id), None)
+    save_faction_state(state)
+
+    faction_tag = str(faction.get("tag") or "")
+    nickname_note = ""
+    if faction_tag:
+        success = await sync_member_faction_nickname(
+            interaction.user,
+            new_tag=faction_tag,
+            base_nick=interaction.user.nick,
+            reason=f"Entrée dans la faction {faction.get('name') or owner_id}",
+        )
+        if not success:
+            nickname_note = "\nLe tag n'a pas pu être appliqué automatiquement au pseudo."
+
+    await interaction.response.send_message(
+        f"Tu as rejoint la faction **{faction.get('name') or 'inconnue'}**.{nickname_note}",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="leavefaction", description="Quitte ta faction actuelle.")
+async def leavefaction(interaction: discord.Interaction) -> None:
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    faction_info = get_faction_for_member(interaction.user.id)
+    if faction_info is None:
+        await interaction.response.send_message(
+            "Tu ne fais partie d'aucune faction.",
+            ephemeral=True,
+        )
+        return
+
+    owner_id, faction = faction_info
+    if owner_id == interaction.user.id:
+        await interaction.response.send_message(
+            "Le chef ne peut pas quitter sa faction. Utilise `/disbandfaction` à la place.",
+            ephemeral=True,
+        )
+        return
+
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        await interaction.response.send_message(
+            "Impossible de quitter la faction pour le moment.",
+            ephemeral=True,
+        )
+        return
+
+    faction_entry = factions.get(str(owner_id))
+    if not isinstance(faction_entry, dict):
+        await interaction.response.send_message(
+            "Faction introuvable.",
+            ephemeral=True,
+        )
+        return
+
+    members = faction_entry.get("members", {})
+    if not isinstance(members, dict):
+        members = {}
+        faction_entry["members"] = members
+
+    member_data = members.pop(str(interaction.user.id), None)
+    save_faction_state(state)
+
+    old_tag = str(faction_entry.get("tag") or "")
+    base_nick = member_data.get("base_nick") if isinstance(member_data, dict) else None
+    await sync_member_faction_nickname(
+        interaction.user,
+        old_tag=old_tag or None,
+        new_tag=None,
+        base_nick=base_nick if isinstance(base_nick, str) else None,
+        reason=f"Départ de faction par {interaction.user}",
+    )
+
+    await interaction.response.send_message(
+        f"Tu as quitté la faction **{faction_entry.get('name') or 'inconnue'}**.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="kickfaction", description="Retire un membre de ta faction.")
+async def kickfaction(
+    interaction: discord.Interaction,
+    membre: discord.Member,
+) -> None:
+    if not isinstance(interaction.user, discord.Member):
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    faction = get_faction_by_owner(interaction.user.id)
+    if faction is None:
+        await interaction.response.send_message(
+            "Tu dois être chef d'une faction pour retirer un membre.",
+            ephemeral=True,
+        )
+        return
+
+    if membre.id == interaction.user.id:
+        await interaction.response.send_message(
+            "Utilise `/disbandfaction` si tu veux fermer ta faction.",
+            ephemeral=True,
+        )
+        return
+
+    target_faction = get_faction_for_member(membre.id)
+    if target_faction is None or target_faction[0] != interaction.user.id:
+        await interaction.response.send_message(
+            f"{membre.mention} n'est pas dans ta faction.",
+            ephemeral=True,
+        )
+        return
+
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        await interaction.response.send_message(
+            "Impossible de retirer ce membre pour le moment.",
+            ephemeral=True,
+        )
+        return
+
+    faction_entry = factions.get(str(interaction.user.id))
+    if not isinstance(faction_entry, dict):
+        await interaction.response.send_message(
+            "Faction introuvable.",
+            ephemeral=True,
+        )
+        return
+
+    members = faction_entry.get("members", {})
+    if not isinstance(members, dict):
+        members = {}
+        faction_entry["members"] = members
+
+    member_data = members.pop(str(membre.id), None)
+    save_faction_state(state)
+
+    old_tag = str(faction_entry.get("tag") or "")
+    base_nick = member_data.get("base_nick") if isinstance(member_data, dict) else None
+    await sync_member_faction_nickname(
+        membre,
+        old_tag=old_tag or None,
+        new_tag=None,
+        base_nick=base_nick if isinstance(base_nick, str) else None,
+        reason=f"Expulsion de faction par {interaction.user}",
+    )
+
+    await interaction.response.send_message(
+        f"{membre.mention} a été retiré de la faction **{faction_entry.get('name') or 'inconnue'}**.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="disbandfaction", description="Dissout ta faction.")
+async def disbandfaction(interaction: discord.Interaction) -> None:
+    if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    invites = state.get("invites", {})
+    if not isinstance(factions, dict) or not isinstance(invites, dict):
+        await interaction.response.send_message(
+            "Impossible de dissoudre la faction pour le moment.",
+            ephemeral=True,
+        )
+        return
+
+    faction = factions.pop(str(interaction.user.id), None)
+    if not isinstance(faction, dict):
+        await interaction.response.send_message(
+            "Tu n'es chef d'aucune faction.",
+            ephemeral=True,
+        )
+        return
+
+    old_tag = str(faction.get("tag") or "")
+    members = faction.get("members", {})
+    if not isinstance(members, dict):
+        members = {}
+
+    for target_id, invited_owner_id in list(invites.items()):
+        if invited_owner_id == str(interaction.user.id):
+            invites.pop(target_id, None)
+
+    save_faction_state(state)
+
+    restored = 0
+    failed = 0
+    for member_id, metadata in members.items():
+        try:
+            target_id = int(member_id)
+        except ValueError:
+            continue
+        member = interaction.guild.get_member(target_id)
+        if member is None:
+            continue
+        base_nick = metadata.get("base_nick") if isinstance(metadata, dict) else None
+        success = await sync_member_faction_nickname(
+            member,
+            old_tag=old_tag or None,
+            new_tag=None,
+            base_nick=base_nick if isinstance(base_nick, str) else None,
+            reason=f"Faction dissoute par {interaction.user}",
+        )
+        if success:
+            restored += 1
+        else:
+            failed += 1
+
+    note = f"\n{failed} pseudo(s) n'ont pas pu être restauré(s)." if failed else ""
+    await interaction.response.send_message(
+        (
+            f"La faction **{faction.get('name') or 'inconnue'}** a été dissoute.\n"
+            f"Pseudo restauré pour **{restored}** membre(s).{note}"
+        ),
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="faction", description="Affiche les informations de ta faction.")
+async def faction(interaction: discord.Interaction) -> None:
+    faction_info = get_faction_for_member(interaction.user.id)
+    if faction_info is None:
+        invite_owner_id = get_faction_invite(interaction.user.id)
+        if invite_owner_id is not None:
+            pending_faction = get_faction_by_owner(invite_owner_id)
+            pending_name = str(pending_faction.get("name") or "inconnue") if pending_faction else "inconnue"
+            await interaction.response.send_message(
+                (
+                    "Tu ne fais partie d'aucune faction.\n"
+                    f"Invitation en attente : **{pending_name}**. Utilise `/joinfaction` pour accepter."
+                ),
+                ephemeral=True,
+            )
+            return
+
+        await interaction.response.send_message(
+            "Tu ne fais partie d'aucune faction.",
+            ephemeral=True,
+        )
+        return
+
+    owner_id, faction_data = faction_info
+    await interaction.response.send_message(
+        embed=build_faction_embed(interaction.guild, owner_id=owner_id, faction=faction_data),
+        ephemeral=True,
+    )
 
 
 @bot.tree.command(name="mute", description="Timeout a member for a set duration.")
