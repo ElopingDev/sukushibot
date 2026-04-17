@@ -1014,7 +1014,7 @@ class WorkMinigameView(discord.ui.View):
             action_label = str(action["label"])
 
             if random.random() < catch_chance:
-                release_at = imprison_user(interaction.user.id)
+                release_at = imprison_user(interaction.user.id, PRISON_DURATION)
                 prison_reward = reward // 2
                 new_balance = add_balance(interaction.user.id, prison_reward)
                 remaining = format_remaining_time(release_at - datetime.now(timezone.utc))
