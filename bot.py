@@ -83,7 +83,7 @@ WORK_COOLDOWN = timedelta(minutes=45)
 ATTACK_COOLDOWN = timedelta(hours=5)
 GLOBAL_ATTACK_COOLDOWN = timedelta(minutes=15)
 CHANGEJOB_COOLDOWN = timedelta(days=1)
-PRISON_DURATION = timedelta(minutes=50)
+PRISON_DURATION = timedelta(minutes=15)
 LOTTERY_DURATION = timedelta(hours=24)
 PRISON_CHANCE = 0.15
 LOTTERY_ENTRY_COST = 2000
@@ -101,32 +101,32 @@ JOB_ACTIONS = {
     "mugger": {
         "prompt": "Choisis ton coup du jour",
         "actions": [
-            {"label": "Voler un passant", "reward": 700, "catch_chance": 0.05},
-            {"label": "Braquer une supérette", "reward": 1050, "catch_chance": 0.15},
-            {"label": "Braquer un bijoutier", "reward": 1500, "catch_chance": 0.35},
+            {"label": "Voler un passant", "reward": 700, "catch_chance": 0.06},
+            {"label": "Braquer une supérette", "reward": 1050, "catch_chance": 0.18},
+            {"label": "Braquer un bijoutier", "reward": 1500, "catch_chance": 0.40},
         ],
     },
     "dealer": {
         "prompt": "Choisis ce que tu vends",
         "actions": [
-            {"label": "Vendre de la weed", "reward": 700, "catch_chance": 0.05},
-            {"label": "Vendre du xanax", "reward": 1100, "catch_chance": 0.15},
-            {"label": "Vendre de la meth", "reward": 1600, "catch_chance": 0.45},
+            {"label": "Vendre de la weed", "reward": 700, "catch_chance": 0.06},
+            {"label": "Vendre du xanax", "reward": 1100, "catch_chance": 0.18},
+            {"label": "Vendre de la meth", "reward": 1600, "catch_chance": 0.50},
         ],
     },
     "pickpocketer": {
         "prompt": "Choisis ta cible",
         "actions": [
-            {"label": "Voler un portefeuille", "reward": 650, "catch_chance": 0.03},
-            {"label": "Voler un téléphone", "reward": 950, "catch_chance": 0.12},
-            {"label": "Détrousser un touriste riche", "reward": 1400, "catch_chance": 0.30},
+            {"label": "Voler un portefeuille", "reward": 650, "catch_chance": 0.04},
+            {"label": "Voler un téléphone", "reward": 950, "catch_chance": 0.15},
+            {"label": "Détrousser un touriste riche", "reward": 1400, "catch_chance": 0.38},
         ],
     },
     "frauder": {
         "prompt": "Choisis ton arnaque",
         "actions": [
-            {"label": "Petite arnaque en ligne", "reward": 750, "catch_chance": 0.02},
-            {"label": "Faux virement bancaire", "reward": 1200, "catch_chance": 0.20},
+            {"label": "Petite arnaque en ligne", "reward": 750, "catch_chance": 0.03},
+            {"label": "Faux virement bancaire", "reward": 1200, "catch_chance": 0.22},
             {"label": "Grosse fraude à la carte", "reward": 1700, "catch_chance": 0.55},
         ],
     },
