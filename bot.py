@@ -4658,64 +4658,64 @@ class PlayHubView(OwnerRestrictedView):
     def build_items(self) -> None:
         self.clear_items()
         if self.page == "home":
-            self.add_item(PlayActionButton("?conomie", "goto:economy", style=discord.ButtonStyle.primary, row=0, emoji="??"))
-            self.add_item(PlayActionButton("Casino", "goto:casino", style=discord.ButtonStyle.primary, row=0, emoji="??"))
-            self.add_item(PlayActionButton("Crime", "goto:crime", style=discord.ButtonStyle.primary, row=0, emoji="??"))
-            self.add_item(PlayActionButton("Gym", "goto:gym", style=discord.ButtonStyle.success, row=1, emoji="???"))
-            self.add_item(PlayActionButton("Shop", "goto:shop", style=discord.ButtonStyle.success, row=1, emoji="??"))
-            self.add_item(PlayActionButton("Faction", "goto:faction", style=discord.ButtonStyle.primary, row=1, emoji="??"))
-            self.add_item(PlayActionButton("Fermer", "close", style=discord.ButtonStyle.secondary, row=2, emoji="??"))
+            self.add_item(PlayActionButton("?conomie", "goto:economy", style=discord.ButtonStyle.primary, row=0, emoji="💰"))
+            self.add_item(PlayActionButton("Casino", "goto:casino", style=discord.ButtonStyle.primary, row=0, emoji="🎰"))
+            self.add_item(PlayActionButton("Crime", "goto:crime", style=discord.ButtonStyle.primary, row=0, emoji="⚔️"))
+            self.add_item(PlayActionButton("Gym", "goto:gym", style=discord.ButtonStyle.success, row=1, emoji="🏋️"))
+            self.add_item(PlayActionButton("Shop", "goto:shop", style=discord.ButtonStyle.success, row=1, emoji="🛒"))
+            self.add_item(PlayActionButton("Faction", "goto:faction", style=discord.ButtonStyle.primary, row=1, emoji="🏴"))
+            self.add_item(PlayActionButton("Fermer", "close", style=discord.ButtonStyle.secondary, row=2, emoji="✖️"))
             return
 
         page_actions: dict[str, list[tuple[str, str, discord.ButtonStyle, str | None]]] = {
             "economy": [
-                ("Solde", "balance", discord.ButtonStyle.secondary, "??"),
-                ("Daily", "daily", discord.ButtonStyle.success, "??"),
-                ("Payer", "pay", discord.ButtonStyle.primary, "??"),
-                ("Riches", "leaderboard", discord.ButtonStyle.secondary, "??"),
-                ("Niveaux", "levelleaderboard", discord.ButtonStyle.secondary, "??"),
-                ("Shop", "goto:shop", discord.ButtonStyle.success, "??"),
+                ("Solde", "balance", discord.ButtonStyle.secondary, "💰"),
+                ("Daily", "daily", discord.ButtonStyle.success, "🪙"),
+                ("Payer", "pay", discord.ButtonStyle.primary, "💸"),
+                ("Riches", "leaderboard", discord.ButtonStyle.secondary, "🏆"),
+                ("Niveaux", "levelleaderboard", discord.ButtonStyle.secondary, "📈"),
+                ("Shop", "goto:shop", discord.ButtonStyle.success, "🛒"),
             ],
             "casino": [
-                ("Blackjack", "blackjack", discord.ButtonStyle.primary, "??"),
-                ("Coinflip", "coinflip", discord.ButtonStyle.primary, "??"),
-                ("Slots", "slots", discord.ButtonStyle.primary, "??"),
-                ("Mines", "mines", discord.ButtonStyle.primary, "??"),
+                ("Blackjack", "blackjack", discord.ButtonStyle.primary, "🃏"),
+                ("Coinflip", "coinflip", discord.ButtonStyle.primary, "🪙"),
+                ("Slots", "slots", discord.ButtonStyle.primary, "🎰"),
+                ("Mines", "mines", discord.ButtonStyle.primary, "💣"),
             ],
             "crime": [
-                ("Work", "work", discord.ButtonStyle.primary, "??"),
-                ("Choisir métier", "getjob", discord.ButtonStyle.secondary, "🕵️"),
-                ("Changer métier", "changejob", discord.ButtonStyle.secondary, "🔁"),
-                ("Attaquer", "attack", discord.ButtonStyle.danger, "??"),
-                ("Gym", "goto:gym", discord.ButtonStyle.success, "???"),
+                ("Work", "work", discord.ButtonStyle.primary, "💼"),
+                ("Choisir m?tier", "getjob", discord.ButtonStyle.secondary, "🕵️"),
+                ("Changer m?tier", "changejob", discord.ButtonStyle.secondary, "🔁"),
+                ("Attaquer", "attack", discord.ButtonStyle.danger, "⚔️"),
+                ("Gym", "goto:gym", discord.ButtonStyle.success, "🏋️"),
             ],
             "gym": [
-                ("Force", "train:force", discord.ButtonStyle.danger, "??"),
-                ("D?fense", "train:defense", discord.ButtonStyle.primary, "???"),
-                ("Vitesse", "train:speed", discord.ButtonStyle.success, "??"),
+                ("Force", "train:force", discord.ButtonStyle.danger, "⚔️"),
+                ("D?fense", "train:defense", discord.ButtonStyle.primary, "🛡️"),
+                ("Vitesse", "train:speed", discord.ButtonStyle.success, "💨"),
             ],
             "shop": [
-                ("Recharge énergie", "buy:energy_refill", discord.ButtonStyle.success, "⚡"),
+                ("Recharge ?nergie", "buy:energy_refill", discord.ButtonStyle.success, "⚡"),
             ],
             "faction": [
-                ("Ma faction", "faction", discord.ButtonStyle.secondary, "??"),
-                ("Classement", "fleaderboard", discord.ButtonStyle.secondary, "??"),
-                ("Créer", "createfaction", discord.ButtonStyle.primary, "➕"),
-                ("Rejoindre", "joinfaction", discord.ButtonStyle.success, "?"),
-                ("Quitter", "leavefaction", discord.ButtonStyle.danger, "??"),
+                ("Ma faction", "faction", discord.ButtonStyle.secondary, "🏴"),
+                ("Classement", "fleaderboard", discord.ButtonStyle.secondary, "🏆"),
+                ("Cr?er", "createfaction", discord.ButtonStyle.primary, "➕"),
+                ("Rejoindre", "joinfaction", discord.ButtonStyle.success, "✅"),
+                ("Quitter", "leavefaction", discord.ButtonStyle.danger, "🚪"),
             ],
             "faction_manage": [
-                ("Tag", "setfactiontag", discord.ButtonStyle.secondary, "???"),
-                ("Inviter", "invitefaction", discord.ButtonStyle.primary, "??"),
-                ("Promouvoir", "promotefaction", discord.ButtonStyle.primary, "??"),
-                ("Salon faction", "createfactionchannel", discord.ButtonStyle.secondary, "??"),
-                ("Ping faction", "pingfaction", discord.ButtonStyle.secondary, "??"),
+                ("Tag", "setfactiontag", discord.ButtonStyle.secondary, "🏷️"),
+                ("Inviter", "invitefaction", discord.ButtonStyle.primary, "📨"),
+                ("Promouvoir", "promotefaction", discord.ButtonStyle.primary, "⬆️"),
+                ("Salon faction", "createfactionchannel", discord.ButtonStyle.secondary, "💬"),
+                ("Ping faction", "pingfaction", discord.ButtonStyle.secondary, "📢"),
             ],
             "faction_allies": [
-                ("Alliance", "ally", discord.ButtonStyle.primary, "??"),
-                ("Rompre", "disbandally", discord.ButtonStyle.danger, "??"),
-                ("Salon allié", "createallychannel", discord.ButtonStyle.secondary, "🔗"),
-                ("Dissoudre", "disbandfaction", discord.ButtonStyle.danger, "???"),
+                ("Alliance", "ally", discord.ButtonStyle.primary, "🤝"),
+                ("Rompre", "disbandally", discord.ButtonStyle.danger, "💥"),
+                ("Salon alli?", "createallychannel", discord.ButtonStyle.secondary, "🔗"),
+                ("Dissoudre", "disbandfaction", discord.ButtonStyle.danger, "🗑️"),
             ],
         }
 
@@ -4726,7 +4726,7 @@ class PlayHubView(OwnerRestrictedView):
         page_index = PLAY_PAGES.index(self.page)
         previous_page = PLAY_PAGES[page_index - 1] if page_index > 1 else "home"
         next_page = PLAY_PAGES[page_index + 1] if page_index < len(PLAY_PAGES) - 1 else "home"
-        self.add_item(PlayNavButton("Précédent", previous_page, row=3, emoji="⬅️"))
+        self.add_item(PlayNavButton("Pr?c?dent", previous_page, row=3, emoji="⬅️"))
         self.add_item(PlayNavButton("Accueil", "home", row=3, emoji="🏠"))
         self.add_item(PlayNavButton("Suivant", next_page, row=3, emoji="➡️"))
         self.add_item(PlayActionButton("Fermer", "close", style=discord.ButtonStyle.secondary, row=3, emoji="✖️"))
