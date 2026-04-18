@@ -97,7 +97,6 @@ CHANGEJOB_FILE = Path("changejob.json")
 LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
 SLOTS_COOLDOWN_FILE = Path("slots_cooldowns.json")
-COINFLIP_COOLDOWN_FILE = Path("coinflip_cooldowns.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
 DAILY_REWARD = 1500
@@ -136,7 +135,6 @@ FACTION_CREATE_COST = 3000
 FACTION_CHANNEL_CATEGORY_ID = 1494843127662641172
 COINFLIP_MULTIPLIER = 1.5
 COINFLIP_WIN_CHANCE = 0.4
-COINFLIP_COOLDOWN = timedelta(minutes=5)
 MINES_GRID_SIZE = 4
 MINES_TOTAL_TILES = MINES_GRID_SIZE * MINES_GRID_SIZE
 MINES_HOUSE_EDGE = 0.68
@@ -4245,14 +4243,6 @@ async def run_slots_action(interaction: discord.Interaction) -> None:
 
 async def run_coinflip_action(interaction: discord.Interaction, mise: int) -> None:
     ensure_minimum_balance(interaction.user.id)
-    remaining = get_cooldown_remaining(COINFLIP_COOLDOWN_FILE, interaction.user.id, COINFLIP_COOLDOWN)
-    if remaining is not None:
-        await interaction.response.send_message(
-            f"Tu dois attendre **{format_remaining_time(remaining)}** avant de rejouer au coinflip.",
-            ephemeral=True,
-        )
-        return
-
     balance_value = get_balance_value(interaction.user.id)
     if mise > balance_value:
         await interaction.response.send_message(
@@ -4261,7 +4251,6 @@ async def run_coinflip_action(interaction: discord.Interaction, mise: int) -> No
         )
         return
 
-    update_cooldown(COINFLIP_COOLDOWN_FILE, interaction.user.id)
     new_balance = set_balance_value(interaction.user.id, balance_value - mise)
     is_win = random.random() < COINFLIP_WIN_CHANCE
 
