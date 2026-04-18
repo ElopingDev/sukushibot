@@ -122,8 +122,10 @@ JAIL_MEMORY_SEQUENCE_LENGTH = 5
 JAIL_WIRE_OPTIONS = (
     ("Fil rouge", discord.ButtonStyle.danger),
     ("Fil bleu", discord.ButtonStyle.primary),
-    ("Fil jaune", discord.ButtonStyle.secondary),
+    ("Fil vert", discord.ButtonStyle.success),
 )
+JAIL_WIRE_INSTRUCTION = "Coupe la couleur non primaire."
+JAIL_WIRE_CORRECT_LABEL = "Fil vert"
 JAIL_TAX_CHANCE = 0.35
 EVENT_GUESS_MIN = 1
 EVENT_GUESS_MAX = 15
@@ -915,8 +917,7 @@ def parse_memory_prison_challenge(challenge: str) -> list[str]:
 
 
 def generate_wire_prison_challenge() -> str:
-    rng = random.SystemRandom()
-    return rng.choice([label for label, _ in JAIL_WIRE_OPTIONS])
+    return JAIL_WIRE_CORRECT_LABEL
 
 
 def choose_prison_variant() -> str:
@@ -2347,7 +2348,7 @@ def build_prison_wires_embed(member: discord.Member, reason: str, *, penalty_tex
         footer="Sukushi bot | Prison",
     )
     embed.add_field(name="Variante", value="Fil ? couper", inline=False)
-    embed.add_field(name="Consigne", value="Coupe le bon fil pour ouvrir la cellule.", inline=False)
+    embed.add_field(name="Consigne", value=JAIL_WIRE_INSTRUCTION, inline=False)
     if tax_amount > 0:
         embed.add_field(name="Taxe pay?e", value=f"**{tax_amount} Sukushi Dollars**", inline=False)
     if penalty_text:
@@ -2640,7 +2641,6 @@ class SukushiBot(discord.Client):
 
     def build_prison_wire_view(self, prisoner_id: int) -> PrisonWireView:
         wire_labels = [label for label, _ in JAIL_WIRE_OPTIONS]
-        random.SystemRandom().shuffle(wire_labels)
         return PrisonWireView(prisoner_id, wire_labels)
 
     async def send_prison_challenge(
