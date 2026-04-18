@@ -370,6 +370,46 @@ async def ensure_not_ecobanned(interaction: discord.Interaction) -> bool:
     return True
 
 
+def is_faction_chat_channel(channel: discord.abc.GuildChannel | None) -> bool:
+    if not isinstance(channel, discord.TextChannel):
+        return False
+
+    if channel.category_id == FACTION_CHANNEL_CATEGORY_ID:
+        return True
+
+    channel_ids: set[int] = set()
+    for _, faction in get_all_factions():
+        raw_channel_id = faction.get("channel_id")
+        try:
+            if raw_channel_id is not None:
+                channel_ids.add(int(raw_channel_id))
+        except (TypeError, ValueError):
+            pass
+
+        raw_ally_channels = faction.get("ally_channels", {})
+        if not isinstance(raw_ally_channels, dict):
+            continue
+        for ally_channel_id in raw_ally_channels.values():
+            try:
+                channel_ids.add(int(ally_channel_id))
+            except (TypeError, ValueError):
+                continue
+
+    return channel.id in channel_ids
+
+
+async def ensure_not_in_faction_chat(interaction: discord.Interaction) -> bool:
+    if not is_faction_chat_channel(interaction.channel):
+        return True
+
+    message_text = "Les commandes économiques du bot sont désactivées dans les salons de faction."
+    if interaction.response.is_done():
+        await interaction.followup.send(message_text, ephemeral=True)
+    else:
+        await interaction.response.send_message(message_text, ephemeral=True)
+    return False
+
+
 def prison_block(*, allow_staff_bypass: bool = False):
     async def predicate(interaction: discord.Interaction) -> bool:
         return await ensure_not_in_prison(
@@ -382,7 +422,9 @@ def prison_block(*, allow_staff_bypass: bool = False):
 
 def economy_block():
     async def predicate(interaction: discord.Interaction) -> bool:
-        return await ensure_not_ecobanned(interaction)
+        if not await ensure_not_ecobanned(interaction):
+            return False
+        return await ensure_not_in_faction_chat(interaction)
 
     return app_commands.check(predicate)
 
