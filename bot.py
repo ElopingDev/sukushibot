@@ -117,7 +117,7 @@ JAIL_CHANNEL_PREFIX = "cellule"
 JAIL_FAILURE_PERCENT = 0.05
 JAIL_TAX_PERCENT_RANGE = (0.05, 0.12)
 JAIL_VARIANTS = ("memory", "wires")
-JAIL_MEMORY_EMOJIS = ("🍎", "🔒", "💎", "🧨", "🧃", "🎲", "🪙", "🗝️")
+JAIL_MEMORY_EMOJIS = ("🍎", "🔒", "💎", "💣", "🍋", "🎲", "⭐", "❤️")
 JAIL_MEMORY_SEQUENCE_LENGTH = 5
 JAIL_WIRE_OPTIONS = (
     ("Fil rouge", discord.ButtonStyle.danger),
