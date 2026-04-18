@@ -2301,9 +2301,9 @@ def build_prison_memory_intro_embed(member: discord.Member, reason: str, *, pena
         color=discord.Color.red(),
         footer="Sukushi bot | Prison",
     )
-    embed.add_field(name="Variante", value="M?moire emoji", inline=False)
+    embed.add_field(name="Variante", value="Mémoire emoji", inline=False)
     if tax_amount > 0:
-        embed.add_field(name="Taxe pay?e", value=f"**{tax_amount} Sukushi Dollars**", inline=False)
+        embed.add_field(name="Taxe payée", value=f"**{tax_amount} Sukushi Dollars**", inline=False)
     if penalty_text:
         embed.add_field(name="Sanction", value=penalty_text, inline=False)
     return embed
@@ -2312,12 +2312,12 @@ def build_prison_memory_intro_embed(member: discord.Member, reason: str, *, pena
 def build_prison_memory_show_embed(member: discord.Member, sequence: list[str]) -> discord.Embed:
     embed = make_embed(
         "Test de sortie de prison",
-        f"{member.mention}, m?morise bien cette suite avant qu'elle disparaisse.",
+        f"{member.mention}, mémorise bien cette suite avant qu'elle disparaisse.",
         color=discord.Color.red(),
         footer="Sukushi bot | Prison",
     )
     embed.add_field(name="Suite", value=" ".join(sequence), inline=False)
-    embed.add_field(name="Variante", value="M?moire emoji", inline=False)
+    embed.add_field(name="Variante", value="Mémoire emoji", inline=False)
     return embed
 
 
@@ -2328,10 +2328,10 @@ def build_prison_memory_play_embed(member: discord.Member, *, progress: int, tot
         color=discord.Color.red(),
         footer="Sukushi bot | Prison",
     )
-    embed.add_field(name="Variante", value="M?moire emoji", inline=False)
+    embed.add_field(name="Variante", value="Mémoire emoji", inline=False)
     embed.add_field(name="Progression", value=f"**{progress}/{total}**", inline=False)
     if tax_amount > 0:
-        embed.add_field(name="Taxe pay?e", value=f"**{tax_amount} Sukushi Dollars**", inline=False)
+        embed.add_field(name="Taxe payée", value=f"**{tax_amount} Sukushi Dollars**", inline=False)
     if penalty_text:
         embed.add_field(name="Sanction", value=penalty_text, inline=False)
     return embed
@@ -2347,10 +2347,10 @@ def build_prison_wires_embed(member: discord.Member, reason: str, *, penalty_tex
         color=discord.Color.red(),
         footer="Sukushi bot | Prison",
     )
-    embed.add_field(name="Variante", value="Fil ? couper", inline=False)
+    embed.add_field(name="Variante", value="Fil à couper", inline=False)
     embed.add_field(name="Consigne", value=JAIL_WIRE_INSTRUCTION, inline=False)
     if tax_amount > 0:
-        embed.add_field(name="Taxe pay?e", value=f"**{tax_amount} Sukushi Dollars**", inline=False)
+        embed.add_field(name="Taxe payée", value=f"**{tax_amount} Sukushi Dollars**", inline=False)
     if penalty_text:
         embed.add_field(name="Sanction", value=penalty_text, inline=False)
     return embed
@@ -2364,13 +2364,13 @@ class PrisonBaseView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
             await interaction.response.send_message(
-                "Cette interaction doit ?tre utilis?e dans le serveur.",
+                "Cette interaction doit être utilisée dans le serveur.",
                 ephemeral=True,
             )
             return False
         if interaction.user.id != self.prisoner_id:
             await interaction.response.send_message(
-                "Cette ?preuve n'est pas pour toi.",
+                "Cette épreuve n'est pas pour toi.",
                 ephemeral=True,
             )
             return False
@@ -2387,7 +2387,7 @@ class PrisonMemoryStartView(PrisonBaseView):
         bot_client = interaction.client
         if not isinstance(bot_client, SukushiBot):
             await interaction.response.send_message(
-                "Impossible de d?marrer cette ?preuve pour le moment.",
+                "Impossible de démarrer cette épreuve pour le moment.",
                 ephemeral=True,
             )
             return
@@ -2395,7 +2395,7 @@ class PrisonMemoryStartView(PrisonBaseView):
         started = await bot_client.start_memory_prison_challenge(interaction)
         if not started and not interaction.response.is_done():
             await interaction.response.send_message(
-                "Cette ?preuve a d?j? commenc? ou n'est plus disponible.",
+                "Cette épreuve a déjà commencé ou n'est plus disponible.",
                 ephemeral=True,
             )
 
@@ -2428,7 +2428,7 @@ class PrisonMemoryAnswerView(PrisonBaseView):
         bot_client = interaction.client
         if not isinstance(bot_client, SukushiBot):
             await interaction.response.send_message(
-                "Impossible de traiter cette ?preuve pour le moment.",
+                "Impossible de traiter cette épreuve pour le moment.",
                 ephemeral=True,
             )
             return
@@ -2461,7 +2461,7 @@ class PrisonWireView(PrisonBaseView):
         bot_client = interaction.client
         if not isinstance(bot_client, SukushiBot):
             await interaction.response.send_message(
-                "Impossible de traiter cette ?preuve pour le moment.",
+                "Impossible de traiter cette épreuve pour le moment.",
                 ephemeral=True,
             )
             return
@@ -2752,7 +2752,7 @@ class SukushiBot(discord.Client):
         )
         penalty_text = None
         if tax_amount > 0:
-            penalty_text = f"Taxe de cellule pr?lev?e : **{tax_amount} Sukushi Dollars**."
+            penalty_text = f"Taxe de cellule prélevée : **{tax_amount} Sukushi Dollars**."
         return await self.send_prison_challenge(member, reason=reason, penalty_text=penalty_text, variant=variant)
 
     async def fail_prison_challenge(
@@ -2767,25 +2767,25 @@ class SukushiBot(discord.Client):
         record_economy_stat("prison_fail", -penalty_amount)
         await channel.send(
             (
-                f"{member.mention} mauvaise r?ponse.\n"
-                f"Tu perds **{penalty_amount} Sukushi Dollars** et une nouvelle ?preuve commence.\n"
+                f"{member.mention} mauvaise réponse.\n"
+                f"Tu perds **{penalty_amount} Sukushi Dollars** et une nouvelle épreuve commence.\n"
                 f"Nouveau solde : **{new_balance} Sukushi Dollars**."
             )
         )
         await self.send_prison_challenge(
             member,
             reason=str(record.get("reason") or "raison inconnue"),
-            penalty_text=f"?chec pr?c?dent : -**{penalty_amount} Sukushi Dollars**.",
+            penalty_text=f"Échec précédent : -**{penalty_amount} Sukushi Dollars**.",
             variant=str(record.get("variant") or choose_prison_variant()),
         )
 
     async def release_prisoner(self, member: discord.Member, channel: discord.TextChannel) -> None:
         remove_prison_record(member.id)
         embed = make_embed(
-            "Lib?ration",
+            "Libération",
             (
-                f"{member.mention} a r?ussi l'?preuve et sort de prison.\n"
-                "Tu peux de nouveau utiliser les commandes ?conomiques."
+                f"{member.mention} a réussi l'épreuve et sort de prison.\n"
+                "Tu peux de nouveau utiliser les commandes économiques."
             ),
             color=discord.Color.green(),
             footer="Sukushi bot | Prison",
@@ -2870,12 +2870,12 @@ class SukushiBot(discord.Client):
 
         record = get_prison_record(interaction.user.id)
         if record is None or record.get("variant") != "memory":
-            await interaction.response.send_message("Cette ?preuve n'est plus active.", ephemeral=True)
+            await interaction.response.send_message("Cette épreuve n'est plus active.", ephemeral=True)
             return
 
         challenge = record.get("challenge")
         if not isinstance(challenge, str) or not challenge:
-            await interaction.response.send_message("Cette ?preuve est invalide.", ephemeral=True)
+            await interaction.response.send_message("Cette épreuve est invalide.", ephemeral=True)
             return
 
         sequence = parse_memory_prison_challenge(challenge)
@@ -2912,12 +2912,12 @@ class SukushiBot(discord.Client):
 
         record = get_prison_record(interaction.user.id)
         if record is None or record.get("variant") != "wires":
-            await interaction.response.send_message("Cette ?preuve n'est plus active.", ephemeral=True)
+            await interaction.response.send_message("Cette épreuve n'est plus active.", ephemeral=True)
             return
 
         challenge = record.get("challenge")
         if not isinstance(challenge, str) or not challenge:
-            await interaction.response.send_message("Cette ?preuve est invalide.", ephemeral=True)
+            await interaction.response.send_message("Cette épreuve est invalide.", ephemeral=True)
             return
 
         await interaction.response.defer()
@@ -2930,7 +2930,7 @@ class SukushiBot(discord.Client):
     async def delete_prison_channel_later(self, channel: discord.TextChannel, delay: float = 10.0) -> None:
         try:
             await asyncio.sleep(delay)
-            await channel.delete(reason="D?fi de prison termin?")
+            await channel.delete(reason="Défi de prison terminé")
         except (asyncio.CancelledError, discord.HTTPException):
             return
 
@@ -2947,12 +2947,12 @@ class SukushiBot(discord.Client):
 
         if record.get("variant") == "memory" and record.get("challenge_sent_at") is None:
             await message.channel.send(
-                f"{message.author.mention} appuie sur **Commencer** pour lancer l'?preuve de m?moire."
+                f"{message.author.mention} appuie sur **Commencer** pour lancer l'épreuve de mémoire."
             )
             return True
 
         await message.channel.send(
-            f"{message.author.mention} utilise les boutons de l'?preuve affich?e pour sortir de prison."
+            f"{message.author.mention} utilise les boutons de l'épreuve affichée pour sortir de prison."
         )
         return True
 
@@ -6504,7 +6504,7 @@ async def run_give_command(
 ) -> None:
     if interaction.user.id != BALANCE_RESET_OWNER_ID:
         await interaction.response.send_message(
-            "Tu n'es pas autoris? ? utiliser cette commande.",
+            "Tu n'es pas autorisé à utiliser cette commande.",
             ephemeral=True,
         )
         return
@@ -6514,14 +6514,14 @@ async def run_give_command(
     record_economy_stat("staff_give", montant)
     await interaction.response.send_message(
         (
-            f"**{montant} Sukushi Dollars** ont ?t? ajout?s ? {member.mention}.\n"
+            f"**{montant} Sukushi Dollars** ont été ajoutés à {member.mention}.\n"
             f"Nouveau solde : **{new_balance} Sukushi Dollars**."
         ),
         ephemeral=True,
     )
 
 
-@bot.tree.command(name="give", description="Ajoute de l'argent ? un utilisateur.")
+@bot.tree.command(name="give", description="Ajoute de l'argent à un utilisateur.")
 @prison_block(allow_staff_bypass=True)
 async def give(
     interaction: discord.Interaction,
@@ -6538,7 +6538,7 @@ async def run_take_command(
 ) -> None:
     if interaction.user.id != BALANCE_RESET_OWNER_ID:
         await interaction.response.send_message(
-            "Tu n'es pas autoris? ? utiliser cette commande.",
+            "Tu n'es pas autorisé à utiliser cette commande.",
             ephemeral=True,
         )
         return
@@ -6550,14 +6550,14 @@ async def run_take_command(
     record_economy_stat("staff_take", -removed_amount)
     await interaction.response.send_message(
         (
-            f"**{removed_amount} Sukushi Dollars** ont ?t? retir?s ? {member.mention}.\n"
+            f"**{removed_amount} Sukushi Dollars** ont été retirés à {member.mention}.\n"
             f"Nouveau solde : **{new_balance} Sukushi Dollars**."
         ),
         ephemeral=True,
     )
 
 
-@bot.tree.command(name="take", description="Retire de l'argent ? un utilisateur.")
+@bot.tree.command(name="take", description="Retire de l'argent à un utilisateur.")
 @prison_block(allow_staff_bypass=True)
 async def take(
     interaction: discord.Interaction,
