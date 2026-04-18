@@ -115,7 +115,6 @@ JAIL_CATEGORY_NAME = "prison"
 JAIL_CHANNEL_PREFIX = "cellule"
 JAIL_CHALLENGE_LENGTH = 35
 JAIL_MEMORY_CHALLENGE_LENGTH = 7
-JAIL_MIN_SOLVE_SECONDS = 10
 JAIL_FAILURE_PERCENT = 0.05
 JAIL_TAX_PERCENT_RANGE = (0.05, 0.12)
 JAIL_VARIANTS = ("normal", "memory", "tax")
@@ -200,7 +199,6 @@ ECONOMY_STAT_LABELS = {
     "event_win": "Événement",
     "level_up": "Niveau",
     "prison_fail": "Prison échec",
-    "prison_cheat": "Prison triche",
     "prison_tax": "Prison taxe",
     "staff_give": "Staff give",
     "staff_take": "Staff take",
@@ -2647,7 +2645,7 @@ class SukushiBot(discord.Client):
                 sent_at = datetime.now(timezone.utc)
 
         elapsed = (datetime.now(timezone.utc) - sent_at).total_seconds()
-        if elapsed < JAIL_MIN_SOLVE_SECONDS:
+        if False:
             current_balance = ensure_minimum_balance(message.author.id)
             new_balance = set_balance_value(message.author.id, current_balance // 2)
             record_economy_stat("prison_cheat", -(current_balance - new_balance))
