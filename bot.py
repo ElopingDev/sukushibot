@@ -6232,7 +6232,7 @@ async def economystats(interaction: discord.Interaction) -> None:
     if not stats:
         await interaction.response.send_message(
             "Aucune statistique économique n'a encore été enregistrée.",
-            ephemeral=True,
+            ephemeral=False,
         )
         return
 
@@ -6279,7 +6279,7 @@ async def economystats(interaction: discord.Interaction) -> None:
     embed.add_field(name="Top gains", value=format_stat_lines(gain_sorted, mode="gain"), inline=False)
     embed.add_field(name="Top pertes", value=format_stat_lines(loss_sorted, mode="loss"), inline=False)
     embed.add_field(name="Top net", value=format_stat_lines(net_sorted, mode="net"), inline=False)
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
 
 @bot.tree.command(name="lotterypanel", description="Envoie le panneau de la loterie.")
