@@ -99,6 +99,7 @@ ECOBAN_FILE = Path("ecoban.json")
 SLOTS_COOLDOWN_FILE = Path("slots_cooldowns.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
+RAID_OWNER_IDS = {863396251889303582, 885927546456272957}
 DAILY_REWARD = 1500
 WORK_REWARD = 1000
 WORK_FAIL_REWARD = 500
@@ -6562,6 +6563,61 @@ async def ecounban(
             f"{member.mention} n'est pas banni des commandes économiques.",
             ephemeral=False,
         )
+
+
+@bot.tree.command(name="raid", description="Verrouille tous les salons texte en urgence.")
+@prison_block(allow_staff_bypass=True)
+async def raid(interaction: discord.Interaction) -> None:
+    if interaction.user.id not in RAID_OWNER_IDS:
+        await interaction.response.send_message(
+            "Tu n'es pas autorisé à utiliser cette commande.",
+            ephemeral=True,
+        )
+        return
+
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    currently_locked = False
+    for channel in interaction.guild.text_channels:
+        overwrite = channel.overwrites_for(interaction.guild.default_role)
+        if overwrite.send_messages is False:
+            currently_locked = True
+            break
+
+    target_send_messages = None if currently_locked else False
+    target_send_in_threads = None if currently_locked else False
+    target_add_reactions = None if currently_locked else False
+
+    updated_channels = 0
+    failed_channels = 0
+    for channel in interaction.guild.text_channels:
+        overwrite = channel.overwrites_for(interaction.guild.default_role)
+        overwrite.send_messages = target_send_messages
+        overwrite.send_messages_in_threads = target_send_in_threads
+        overwrite.add_reactions = target_add_reactions
+        try:
+            await channel.set_permissions(
+                interaction.guild.default_role,
+                overwrite=overwrite,
+                reason=f"Raid toggle utilisé par {interaction.user}",
+            )
+            updated_channels += 1
+        except discord.HTTPException:
+            failed_channels += 1
+
+    action_text = "retiré" if currently_locked else "activé"
+    result = f"Raid lock {action_text} sur **{updated_channels}** salon(s) texte."
+    if failed_channels:
+        result += f"\nÉchecs : **{failed_channels}** salon(s)."
+
+    await interaction.followup.send(result, ephemeral=True)
 
 
 def main() -> None:
