@@ -133,6 +133,7 @@ SLOTS_JACKPOT_CHANCE = 0.03
 SLOTS_COOLDOWN = timedelta(minutes=1)
 FACTION_CREATE_COST = 3000
 FACTION_CHANNEL_CATEGORY_ID = 1494843127662641172
+COINFLIP_MULTIPLIER = 1.5
 MINES_GRID_SIZE = 4
 MINES_TOTAL_TILES = MINES_GRID_SIZE * MINES_GRID_SIZE
 MINES_HOUSE_EDGE = 0.68
@@ -187,6 +188,8 @@ ECONOMY_STAT_LABELS = {
     "attack_steal": "Attaque",
     "blackjack_win": "Blackjack gain",
     "blackjack_loss": "Blackjack perte",
+    "coinflip_win": "Coinflip gain",
+    "coinflip_loss": "Coinflip perte",
     "slots_jackpot": "Slots jackpot",
     "slots_spin": "Slots mise",
     "mines_cashout": "Mines cashout",
@@ -4237,6 +4240,50 @@ async def run_slots_action(interaction: discord.Interaction) -> None:
     await interaction.edit_original_response(embed=final_embed)
 
 
+async def run_coinflip_action(interaction: discord.Interaction, mise: int) -> None:
+    ensure_minimum_balance(interaction.user.id)
+    balance_value = get_balance_value(interaction.user.id)
+    if mise > balance_value:
+        await interaction.response.send_message(
+            f"Tu n'as pas assez d'argent. Solde actuel : **{balance_value} Sukushi Dollars**.",
+            ephemeral=True,
+        )
+        return
+
+    new_balance = set_balance_value(interaction.user.id, balance_value - mise)
+    is_win = random.random() < 0.5
+
+    if is_win:
+        winnings = int(mise * COINFLIP_MULTIPLIER)
+        new_balance = add_balance(interaction.user.id, winnings)
+        profit = winnings - mise
+        record_economy_stat("coinflip_win", profit)
+        embed = make_embed(
+            "Coinflip gagné",
+            (
+                "🪙 La pièce tombe du bon côté.\n"
+                f"Tu gagnes **{winnings} Sukushi Dollars**.\n"
+                f"Nouveau solde : **{new_balance} Sukushi Dollars**."
+            ),
+            color=discord.Color.green(),
+            footer="Sukushi bot | Coinflip",
+        )
+    else:
+        record_economy_stat("coinflip_loss", -mise)
+        embed = make_embed(
+            "Coinflip perdu",
+            (
+                "🪙 La pièce ne tombe pas en ta faveur.\n"
+                f"Tu perds **{mise} Sukushi Dollars**.\n"
+                f"Nouveau solde : **{new_balance} Sukushi Dollars**."
+            ),
+            color=discord.Color.red(),
+            footer="Sukushi bot | Coinflip",
+        )
+
+    await interaction.response.send_message(embed=embed)
+
+
 async def run_mines_action(interaction: discord.Interaction, mise: int, bombes: int) -> None:
     if interaction.user.id in ACTIVE_MINES_USERS:
         await interaction.response.send_message(
@@ -4732,6 +4779,16 @@ async def blackjack(
 
     view = BlackjackView(interaction.user, mise)
     await view.start_game(interaction)
+
+
+@bot.tree.command(name="coinflip", description="Joue à pile ou face avec une cote de 50/50.")
+@prison_block()
+@economy_block()
+async def coinflip(
+    interaction: discord.Interaction,
+    mise: app_commands.Range[int, 1, 1_000_000],
+) -> None:
+    await run_coinflip_action(interaction, mise)
 
 
 @bot.tree.command(name="slots", description="Lance les slots pour 100 Sukushi Dollars.")
