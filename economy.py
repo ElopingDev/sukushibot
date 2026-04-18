@@ -311,6 +311,7 @@ def load_faction_state() -> dict[str, dict[str, object]]:
             raw_members = raw_faction.get("members", {})
             raw_channel_id = raw_faction.get("channel_id")
             raw_ally_channels = raw_faction.get("ally_channels", {})
+            raw_role_id = raw_faction.get("role_id")
 
             allies: list[str] = []
             if isinstance(raw_allies, list):
@@ -321,6 +322,12 @@ def load_faction_state() -> dict[str, dict[str, object]]:
                 channel_id = int(raw_channel_id) if raw_channel_id is not None else None
             except (TypeError, ValueError):
                 channel_id = None
+
+            role_id: int | None
+            try:
+                role_id = int(raw_role_id) if raw_role_id is not None else None
+            except (TypeError, ValueError):
+                role_id = None
 
             ally_channels: dict[str, int] = {}
             if isinstance(raw_ally_channels, dict):
@@ -362,6 +369,7 @@ def load_faction_state() -> dict[str, dict[str, object]]:
                 "allies": allies,
                 "channel_id": channel_id,
                 "ally_channels": ally_channels,
+                "role_id": role_id,
                 "members": members,
             }
 

@@ -710,11 +710,14 @@ def build_faction_embed(
         inline=True,
     )
     embed.add_field(name="Membres", value=f"**{len(member_ids)}**", inline=True)
+    faction_role_id = faction.get("role_id")
+    role_value = f"<@&{faction_role_id}>" if isinstance(faction_role_id, int) else "Aucun"
     embed.add_field(
         name="Co-Leaders",
         value="\n".join(co_leader_mentions[:8]) if co_leader_mentions else "Aucun",
         inline=True,
     )
+    embed.add_field(name="Rôle", value=role_value, inline=True)
     embed.add_field(
         name="Liste",
         value="\n".join(member_mentions) if member_mentions else "Aucun membre.",
@@ -729,6 +732,87 @@ def get_role_by_id(guild: discord.Guild | None, role_id: int) -> discord.Role | 
     if guild is None:
         return None
     return guild.get_role(role_id)
+
+
+def build_faction_role_name(faction: dict[str, object]) -> str:
+    tag = normalize_faction_tag(str(faction.get("tag") or ""))
+    name = str(faction.get("name") or "Faction").strip() or "Faction"
+    if tag:
+        base_name = f"[{tag}] {name}"
+    else:
+        base_name = f"Faction | {name}"
+    return base_name[:100]
+
+
+async def ensure_faction_role(
+    guild: discord.Guild,
+    owner_id: int,
+    faction: dict[str, object],
+) -> discord.Role | None:
+    state = load_faction_state()
+    factions = state.get("factions", {})
+    if not isinstance(factions, dict):
+        return None
+
+    faction_entry = factions.get(str(owner_id))
+    if not isinstance(faction_entry, dict):
+        return None
+
+    role_id = faction_entry.get("role_id")
+    role = get_role_by_id(guild, int(role_id)) if isinstance(role_id, int) else None
+    target_name = build_faction_role_name(faction_entry)
+
+    if role is None:
+        try:
+            role = await guild.create_role(
+                name=target_name,
+                mentionable=False,
+                reason=f"Rôle de faction créé pour {target_name}",
+            )
+        except discord.HTTPException:
+            return None
+        faction_entry["role_id"] = role.id
+        save_faction_state(state)
+        return role
+
+    if role.name != target_name or role.mentionable:
+        try:
+            await role.edit(
+                name=target_name,
+                mentionable=False,
+                reason=f"Synchronisation du rôle de faction {target_name}",
+            )
+        except discord.HTTPException:
+            pass
+    return role
+
+
+async def sync_faction_role_members(
+    guild: discord.Guild,
+    owner_id: int,
+) -> None:
+    faction = get_faction_by_owner(owner_id)
+    if faction is None:
+        return
+
+    role = await ensure_faction_role(guild, owner_id, faction)
+    if role is None:
+        return
+
+    member_ids = get_faction_member_ids(faction)
+    for member in guild.members:
+        has_role = role in member.roles
+        should_have_role = member.id in member_ids
+        if should_have_role and not has_role:
+            try:
+                await member.add_roles(role, reason=f"Synchronisation du rôle de faction {role.name}")
+            except discord.HTTPException:
+                continue
+        elif has_role and not should_have_role:
+            try:
+                await member.remove_roles(role, reason=f"Synchronisation du rôle de faction {role.name}")
+            except discord.HTTPException:
+                continue
 
 
 def get_saved_raid_channel_ids(guild_id: int) -> set[int]:
@@ -2299,6 +2383,10 @@ class SukushiBot(discord.Client):
         if self.user is None:
             return
         print(f"Logged in as {self.user} (ID: {self.user.id})")
+        primary_guild = self.get_guild(PRIMARY_GUILD_ID)
+        if primary_guild is not None:
+            for owner_id, _ in get_all_factions():
+                await sync_faction_role_members(primary_guild, owner_id)
         if self.random_event_task is None or self.random_event_task.done():
             self.random_event_task = asyncio.create_task(self.run_random_event_loop())
         if not self.restored_tempbans:
@@ -4929,6 +5017,7 @@ async def createfaction(
         "allies": [],
         "channel_id": None,
         "ally_channels": {},
+        "role_id": None,
         "members": {
             str(interaction.user.id): {
                 "joined_at": datetime.now(timezone.utc).isoformat(),
@@ -4940,6 +5029,7 @@ async def createfaction(
     new_balance = set_balance_value(interaction.user.id, balance_value - FACTION_CREATE_COST)
     record_economy_stat("faction_create", -FACTION_CREATE_COST)
     save_faction_state(state)
+    await sync_faction_role_members(interaction.guild, interaction.user.id)
 
     await interaction.response.send_message(
         (
@@ -5156,6 +5246,8 @@ async def setfactiontag(
     old_tag = str(faction_entry.get("tag") or "")
     faction_entry["tag"] = normalized_tag
     save_faction_state(state)
+    await ensure_faction_role(interaction.guild, interaction.user.id, faction_entry)
+    await sync_faction_role_members(interaction.guild, interaction.user.id)
 
     members = faction_entry.get("members", {})
     updated_members = 0
@@ -5297,6 +5389,7 @@ async def joinfaction(interaction: discord.Interaction) -> None:
     }
     invites.pop(str(interaction.user.id), None)
     save_faction_state(state)
+    await sync_faction_role_members(interaction.guild, owner_id)
     await sync_member_faction_access(interaction.guild, owner_id)
 
     faction_tag = str(faction.get("tag") or "")
@@ -5361,6 +5454,7 @@ async def leavefaction(interaction: discord.Interaction) -> None:
     member_data = members.pop(str(interaction.user.id), None)
     save_faction_state(state)
     if interaction.guild is not None:
+        await sync_faction_role_members(interaction.guild, owner_id)
         await sync_member_faction_access(interaction.guild, owner_id)
 
     old_tag = str(faction_entry.get("tag") or "")
@@ -5432,6 +5526,7 @@ async def kickfaction(
     member_data = members.pop(str(membre.id), None)
     save_faction_state(state)
     if interaction.guild is not None:
+        await sync_faction_role_members(interaction.guild, interaction.user.id)
         await sync_member_faction_access(interaction.guild, interaction.user.id)
 
     old_tag = str(faction_entry.get("tag") or "")
@@ -5552,6 +5647,7 @@ async def disbandfaction(interaction: discord.Interaction) -> None:
         members = {}
     allies = get_faction_allies(faction)
     faction_channel_id = faction.get("channel_id")
+    faction_role_id = faction.get("role_id")
     ally_channels = faction.get("ally_channels", {})
     if not isinstance(ally_channels, dict):
         ally_channels = {}
@@ -5583,6 +5679,13 @@ async def disbandfaction(interaction: discord.Interaction) -> None:
     if faction_channel is not None:
         try:
             await faction_channel.delete(reason=f"Faction dissoute par {interaction.user}")
+        except discord.HTTPException:
+            pass
+
+    faction_role = get_role_by_id(interaction.guild, int(faction_role_id)) if isinstance(faction_role_id, int) else None
+    if faction_role is not None:
+        try:
+            await faction_role.delete(reason=f"Faction dissoute par {interaction.user}")
         except discord.HTTPException:
             pass
 
@@ -5659,6 +5762,43 @@ async def faction(interaction: discord.Interaction) -> None:
     owner_id, faction_data = faction_info
     await interaction.response.send_message(
         embed=build_faction_embed(interaction.guild, owner_id=owner_id, faction=faction_data),
+    )
+
+
+@bot.tree.command(name="pingfaction", description="Ping le rôle de ta faction.")
+async def pingfaction(
+    interaction: discord.Interaction,
+    message: app_commands.Range[str, 1, 120] | None = None,
+) -> None:
+    if not isinstance(interaction.user, discord.Member) or interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+        )
+        return
+
+    faction_info = get_faction_for_member(interaction.user.id)
+    if faction_info is None:
+        await interaction.response.send_message(
+            "Tu ne fais partie d'aucune faction.",
+        )
+        return
+
+    owner_id, faction_data = faction_info
+    role = await ensure_faction_role(interaction.guild, owner_id, faction_data)
+    if role is None:
+        await interaction.response.send_message(
+            "Impossible de trouver ou créer le rôle de ta faction pour le moment.",
+        )
+        return
+
+    await sync_faction_role_members(interaction.guild, owner_id)
+
+    ping_text = role.mention
+    if message:
+        ping_text = f"{ping_text} {message.strip()}"
+    await interaction.response.send_message(
+        ping_text,
+        allowed_mentions=discord.AllowedMentions(roles=[role]),
     )
 
 
