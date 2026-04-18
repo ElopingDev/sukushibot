@@ -4695,7 +4695,7 @@ class PlayHubView(OwnerRestrictedView):
                 ("Vitesse", "train:speed", discord.ButtonStyle.success, "\U0001F4A8"),
             ],
             "shop": [
-                ("Recharge énergie", "buy:energy_refill", discord.ButtonStyle.success, "\u26a1\ufe0f"),
+                ("Recharge énergie", "buy:energy_refill", discord.ButtonStyle.success, "\U0001F4A8"),
             ],
             "faction": [
                 ("Ma faction", "faction", discord.ButtonStyle.secondary, "\U0001F3F4"),
