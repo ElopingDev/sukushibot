@@ -4338,7 +4338,7 @@ async def ensure_panel_access(interaction: discord.Interaction) -> bool:
 PLAY_PAGES = ["home", "economy", "casino", "crime", "gym", "shop", "faction", "faction_manage", "faction_allies"]
 PLAY_PAGE_TITLES = {
     "home": "Play Hub",
-    "economy": "Économie",
+    "economy": "\u00c9conomie",
     "casino": "Casino",
     "crime": "Crime",
     "gym": "Gym",
@@ -4348,15 +4348,15 @@ PLAY_PAGE_TITLES = {
     "faction_allies": "Faction | Alliances",
 }
 PLAY_PAGE_DESCRIPTIONS = {
-    "home": "Navigue proprement entre les catégories du bot avec les boutons ci-dessous.",
-    "economy": "Tout ce qui touche à ton argent, tes gains et les classements.",
+    "home": "Navigue proprement entre les cat\u00e9gories du bot avec les boutons ci-dessous.",
+    "economy": "Tout ce qui touche \u00e0 ton argent, tes gains et les classements.",
     "casino": "Jeux de hasard et prises de risque.",
-    "crime": "Travail, métier et attaques.",
-    "gym": "Améliore tes stats de combat avec ton énergie.",
-    "shop": "Achète des objets utiles pour ta progression.",
-    "faction": "Vue générale de ta faction et actions principales.",
-    "faction_manage": "Tout ce qu'il faut pour gérer les membres et le rôle de ta faction.",
-    "faction_allies": "Alliances, salons partagés et fin de faction.",
+    "crime": "Travail, m\u00e9tier et attaques.",
+    "gym": "Am\u00e9liore tes stats de combat avec ton \u00e9nergie.",
+    "shop": "Ach\u00e8te des objets utiles pour ta progression.",
+    "faction": "Vue g\u00e9n\u00e9rale de ta faction et actions principales.",
+    "faction_manage": "Tout ce qu'il faut pour g\u00e9rer les membres et le r\u00f4le de ta faction.",
+    "faction_allies": "Alliances, salons partag\u00e9s et fin de faction.",
 }
 
 
@@ -4366,7 +4366,7 @@ def build_play_embed(member: discord.abc.User | discord.Member, page: str) -> di
     max_hp = get_attack_max_hp(member.id)
     embed = make_embed(
         PLAY_PAGE_TITLES.get(page, "Play Hub"),
-        PLAY_PAGE_DESCRIPTIONS.get(page, "Choisis une catégorie."),
+        PLAY_PAGE_DESCRIPTIONS.get(page, "Choisis une cat\u00e9gorie."),
         color=SUKUSHI_PINK,
         footer="Sukushi bot | Play",
     )
@@ -4376,27 +4376,27 @@ def build_play_embed(member: discord.abc.User | discord.Member, page: str) -> di
         embed.add_field(
             name="Gym",
             value=(
-                f"⚡ Énergie **{attack_energy}/{ATTACK_ENERGY_MAX}** • {energy_suffix}\n"
-                f"❤️ PV max **{max_hp}**\n"
+                f"\u26a1\ufe0f \u00c9nergie **{attack_energy}/{ATTACK_ENERGY_MAX}** \u2022 {energy_suffix}\n"
+                f"\u2764\ufe0f PV max **{max_hp}**\n"
                 f"{format_attack_stats(combat_stats)}"
             ),
             inline=False,
         )
-        embed.add_field(name="Économie", value="Solde, daily, paiements et classements.", inline=False)
+        embed.add_field(name="\u00c9conomie", value="Solde, daily, paiements et classements.", inline=False)
         embed.add_field(name="Casino", value="Blackjack, coinflip, slots et mines.", inline=False)
-        embed.add_field(name="Crime", value="Travail, métier, gym et attaques.", inline=False)
-        embed.add_field(name="Shop", value="Recharge ton énergie et achète les futurs objets utiles.", inline=False)
-        embed.add_field(name="Faction", value="Créer, gérer et faire vivre ta faction.", inline=False)
+        embed.add_field(name="Crime", value="Travail, m\u00e9tier, gym et attaques.", inline=False)
+        embed.add_field(name="Shop", value="Recharge ton \u00e9nergie et ach\u00e8te les futurs objets utiles.", inline=False)
+        embed.add_field(name="Faction", value="Cr\u00e9er, g\u00e9rer et faire vivre ta faction.", inline=False)
     elif page == "economy":
         embed.add_field(name="Actions", value="`Solde` `Daily` `Payer` `Riches` `Niveaux`", inline=False)
     elif page == "casino":
         embed.add_field(name="Actions", value="`Blackjack` `Coinflip` `Slots` `Mines`", inline=False)
     elif page == "crime":
-        embed.add_field(name="Actions", value="`Work` `Choisir métier` `Changer métier` `Attaquer` `Gym`", inline=False)
+        embed.add_field(name="Actions", value="`Work` `Choisir m\u00e9tier` `Changer m\u00e9tier` `Attaquer` `Gym`", inline=False)
         embed.add_field(
             name="Combat",
             value=(
-                f"❤️ PV max **{max_hp}**\n"
+                f"\u2764\ufe0f PV max **{max_hp}**\n"
                 f"{format_attack_stats(combat_stats)}"
             ),
             inline=False,
@@ -4405,8 +4405,8 @@ def build_play_embed(member: discord.abc.User | discord.Member, page: str) -> di
         embed.add_field(
             name="Salle de sport",
             value=(
-                f"⚡ Énergie **{attack_energy}/{ATTACK_ENERGY_MAX}** • {energy_suffix}\n"
-                f"Chaque entraînement coûte **{GYM_ENERGY_COST}** énergie.\n"
+                f"\u26a1\ufe0f \u00c9nergie **{attack_energy}/{ATTACK_ENERGY_MAX}** \u2022 {energy_suffix}\n"
+                f"Chaque entra\u00eenement co\u00fbte **{GYM_ENERGY_COST}** \u00e9nergie.\n"
                 f"Cap par stat : **{GYM_STAT_CAP}**"
             ),
             inline=False,
@@ -4414,7 +4414,7 @@ def build_play_embed(member: discord.abc.User | discord.Member, page: str) -> di
         embed.add_field(
             name="Tes stats",
             value=(
-                f"❤️ PV max **{max_hp}**\n"
+                f"\u2764\ufe0f PV max **{max_hp}**\n"
                 f"{format_attack_stats(combat_stats)}"
             ),
             inline=False,
@@ -4423,22 +4423,22 @@ def build_play_embed(member: discord.abc.User | discord.Member, page: str) -> di
         embed.add_field(
             name="Boutique",
             value=(
-                f"`Recharge énergie` • **{SHOP_ENERGY_REFILL_COST} Sukushi Dollars**\n"
-                f"Remplit toute ton énergie. Achat limité à une fois toutes les **3 heures**."
+                f"`Recharge \u00e9nergie` \u2022 **{SHOP_ENERGY_REFILL_COST} Sukushi Dollars**\n"
+                f"Remplit toute ton \u00e9nergie. Achat limit\u00e9 \u00e0 une fois toutes les **3 heures**."
             ),
             inline=False,
         )
         embed.add_field(
-            name="État",
-            value=f"⚡ Énergie actuelle : **{attack_energy}/{ATTACK_ENERGY_MAX}**",
+            name="\u00c9tat",
+            value=f"\u26a1\ufe0f \u00c9nergie actuelle : **{attack_energy}/{ATTACK_ENERGY_MAX}**",
             inline=False,
         )
     elif page == "faction":
-        embed.add_field(name="Actions", value="`Ma faction` `Classement` `Créer` `Rejoindre` `Quitter`", inline=False)
+        embed.add_field(name="Actions", value="`Ma faction` `Classement` `Cr\u00e9er` `Rejoindre` `Quitter`", inline=False)
     elif page == "faction_manage":
         embed.add_field(name="Actions", value="`Tag` `Inviter` `Promouvoir` `Salon faction` `Ping faction`", inline=False)
     elif page == "faction_allies":
-        embed.add_field(name="Actions", value="`Alliance` `Rompre` `Salon allié` `Dissoudre`", inline=False)
+        embed.add_field(name="Actions", value="`Alliance` `Rompre` `Salon alli\u00e9` `Dissoudre`", inline=False)
     return embed
 
 
@@ -4658,64 +4658,64 @@ class PlayHubView(OwnerRestrictedView):
     def build_items(self) -> None:
         self.clear_items()
         if self.page == "home":
-            self.add_item(PlayActionButton("?conomie", "goto:economy", style=discord.ButtonStyle.primary, row=0, emoji="💰"))
-            self.add_item(PlayActionButton("Casino", "goto:casino", style=discord.ButtonStyle.primary, row=0, emoji="🎰"))
-            self.add_item(PlayActionButton("Crime", "goto:crime", style=discord.ButtonStyle.primary, row=0, emoji="⚔️"))
-            self.add_item(PlayActionButton("Gym", "goto:gym", style=discord.ButtonStyle.success, row=1, emoji="🏋️"))
-            self.add_item(PlayActionButton("Shop", "goto:shop", style=discord.ButtonStyle.success, row=1, emoji="🛒"))
-            self.add_item(PlayActionButton("Faction", "goto:faction", style=discord.ButtonStyle.primary, row=1, emoji="🏴"))
-            self.add_item(PlayActionButton("Fermer", "close", style=discord.ButtonStyle.secondary, row=2, emoji="✖️"))
+            self.add_item(PlayActionButton("\u00c9conomie", "goto:economy", style=discord.ButtonStyle.primary, row=0, emoji="\U0001F4B0"))
+            self.add_item(PlayActionButton("Casino", "goto:casino", style=discord.ButtonStyle.primary, row=0, emoji="\U0001F3B0"))
+            self.add_item(PlayActionButton("Crime", "goto:crime", style=discord.ButtonStyle.primary, row=0, emoji="\u2694\ufe0f"))
+            self.add_item(PlayActionButton("Gym", "goto:gym", style=discord.ButtonStyle.success, row=1, emoji="\U0001F3CB\ufe0f"))
+            self.add_item(PlayActionButton("Shop", "goto:shop", style=discord.ButtonStyle.success, row=1, emoji="\U0001F6D2"))
+            self.add_item(PlayActionButton("Faction", "goto:faction", style=discord.ButtonStyle.primary, row=1, emoji="\U0001F3F4"))
+            self.add_item(PlayActionButton("Fermer", "close", style=discord.ButtonStyle.secondary, row=2, emoji="\u2716\ufe0f"))
             return
 
         page_actions: dict[str, list[tuple[str, str, discord.ButtonStyle, str | None]]] = {
             "economy": [
-                ("Solde", "balance", discord.ButtonStyle.secondary, "💰"),
-                ("Daily", "daily", discord.ButtonStyle.success, "🪙"),
-                ("Payer", "pay", discord.ButtonStyle.primary, "💸"),
-                ("Riches", "leaderboard", discord.ButtonStyle.secondary, "🏆"),
-                ("Niveaux", "levelleaderboard", discord.ButtonStyle.secondary, "📈"),
-                ("Shop", "goto:shop", discord.ButtonStyle.success, "🛒"),
+                ("Solde", "balance", discord.ButtonStyle.secondary, "\U0001F4B0"),
+                ("Daily", "daily", discord.ButtonStyle.success, "\U0001FA99"),
+                ("Payer", "pay", discord.ButtonStyle.primary, "\U0001F4B8"),
+                ("Riches", "leaderboard", discord.ButtonStyle.secondary, "\U0001F3C6"),
+                ("Niveaux", "levelleaderboard", discord.ButtonStyle.secondary, "\U0001F4C8"),
+                ("Shop", "goto:shop", discord.ButtonStyle.success, "\U0001F6D2"),
             ],
             "casino": [
-                ("Blackjack", "blackjack", discord.ButtonStyle.primary, "🃏"),
-                ("Coinflip", "coinflip", discord.ButtonStyle.primary, "🪙"),
-                ("Slots", "slots", discord.ButtonStyle.primary, "🎰"),
-                ("Mines", "mines", discord.ButtonStyle.primary, "💣"),
+                ("Blackjack", "blackjack", discord.ButtonStyle.primary, "\U0001F0CF"),
+                ("Coinflip", "coinflip", discord.ButtonStyle.primary, "\U0001FA99"),
+                ("Slots", "slots", discord.ButtonStyle.primary, "\U0001F3B0"),
+                ("Mines", "mines", discord.ButtonStyle.primary, "\U0001F4A3"),
             ],
             "crime": [
-                ("Work", "work", discord.ButtonStyle.primary, "💼"),
-                ("Choisir m?tier", "getjob", discord.ButtonStyle.secondary, "🕵️"),
-                ("Changer m?tier", "changejob", discord.ButtonStyle.secondary, "🔁"),
-                ("Attaquer", "attack", discord.ButtonStyle.danger, "⚔️"),
-                ("Gym", "goto:gym", discord.ButtonStyle.success, "🏋️"),
+                ("Work", "work", discord.ButtonStyle.primary, "\U0001F4BC"),
+                ("Choisir métier", "getjob", discord.ButtonStyle.secondary, "\U0001F575\ufe0f"),
+                ("Changer métier", "changejob", discord.ButtonStyle.secondary, "\U0001F501"),
+                ("Attaquer", "attack", discord.ButtonStyle.danger, "\u2694\ufe0f"),
+                ("Gym", "goto:gym", discord.ButtonStyle.success, "\U0001F3CB\ufe0f"),
             ],
             "gym": [
-                ("Force", "train:force", discord.ButtonStyle.danger, "⚔️"),
-                ("D?fense", "train:defense", discord.ButtonStyle.primary, "🛡️"),
-                ("Vitesse", "train:speed", discord.ButtonStyle.success, "💨"),
+                ("Force", "train:force", discord.ButtonStyle.danger, "\u2694\ufe0f"),
+                ("Défense", "train:defense", discord.ButtonStyle.primary, "\U0001F6E1\ufe0f"),
+                ("Vitesse", "train:speed", discord.ButtonStyle.success, "\U0001F4A8"),
             ],
             "shop": [
-                ("Recharge ?nergie", "buy:energy_refill", discord.ButtonStyle.success, "⚡"),
+                ("Recharge énergie", "buy:energy_refill", discord.ButtonStyle.success, "\u26a1\ufe0f"),
             ],
             "faction": [
-                ("Ma faction", "faction", discord.ButtonStyle.secondary, "🏴"),
-                ("Classement", "fleaderboard", discord.ButtonStyle.secondary, "🏆"),
-                ("Cr?er", "createfaction", discord.ButtonStyle.primary, "➕"),
-                ("Rejoindre", "joinfaction", discord.ButtonStyle.success, "✅"),
-                ("Quitter", "leavefaction", discord.ButtonStyle.danger, "🚪"),
+                ("Ma faction", "faction", discord.ButtonStyle.secondary, "\U0001F3F4"),
+                ("Classement", "fleaderboard", discord.ButtonStyle.secondary, "\U0001F3C6"),
+                ("Créer", "createfaction", discord.ButtonStyle.primary, "\u2795"),
+                ("Rejoindre", "joinfaction", discord.ButtonStyle.success, "\u2705"),
+                ("Quitter", "leavefaction", discord.ButtonStyle.danger, "\U0001F6AA"),
             ],
             "faction_manage": [
-                ("Tag", "setfactiontag", discord.ButtonStyle.secondary, "🏷️"),
-                ("Inviter", "invitefaction", discord.ButtonStyle.primary, "📨"),
-                ("Promouvoir", "promotefaction", discord.ButtonStyle.primary, "⬆️"),
-                ("Salon faction", "createfactionchannel", discord.ButtonStyle.secondary, "💬"),
-                ("Ping faction", "pingfaction", discord.ButtonStyle.secondary, "📢"),
+                ("Tag", "setfactiontag", discord.ButtonStyle.secondary, "\U0001F3F7\ufe0f"),
+                ("Inviter", "invitefaction", discord.ButtonStyle.primary, "\U0001F4E8"),
+                ("Promouvoir", "promotefaction", discord.ButtonStyle.primary, "\u2B06\ufe0f"),
+                ("Salon faction", "createfactionchannel", discord.ButtonStyle.secondary, "\U0001F4AC"),
+                ("Ping faction", "pingfaction", discord.ButtonStyle.secondary, "\U0001F4E2"),
             ],
             "faction_allies": [
-                ("Alliance", "ally", discord.ButtonStyle.primary, "🤝"),
-                ("Rompre", "disbandally", discord.ButtonStyle.danger, "💥"),
-                ("Salon alli?", "createallychannel", discord.ButtonStyle.secondary, "🔗"),
-                ("Dissoudre", "disbandfaction", discord.ButtonStyle.danger, "🗑️"),
+                ("Alliance", "ally", discord.ButtonStyle.primary, "\U0001F91D"),
+                ("Rompre", "disbandally", discord.ButtonStyle.danger, "\U0001F4A5"),
+                ("Salon allié", "createallychannel", discord.ButtonStyle.secondary, "\U0001F517"),
+                ("Dissoudre", "disbandfaction", discord.ButtonStyle.danger, "\U0001F5D1\ufe0f"),
             ],
         }
 
@@ -4726,10 +4726,10 @@ class PlayHubView(OwnerRestrictedView):
         page_index = PLAY_PAGES.index(self.page)
         previous_page = PLAY_PAGES[page_index - 1] if page_index > 1 else "home"
         next_page = PLAY_PAGES[page_index + 1] if page_index < len(PLAY_PAGES) - 1 else "home"
-        self.add_item(PlayNavButton("Pr?c?dent", previous_page, row=3, emoji="⬅️"))
-        self.add_item(PlayNavButton("Accueil", "home", row=3, emoji="🏠"))
-        self.add_item(PlayNavButton("Suivant", next_page, row=3, emoji="➡️"))
-        self.add_item(PlayActionButton("Fermer", "close", style=discord.ButtonStyle.secondary, row=3, emoji="✖️"))
+        self.add_item(PlayNavButton("Précédent", previous_page, row=3, emoji="\u2B05\ufe0f"))
+        self.add_item(PlayNavButton("Accueil", "home", row=3, emoji="\U0001F3E0"))
+        self.add_item(PlayNavButton("Suivant", next_page, row=3, emoji="\u27A1\ufe0f"))
+        self.add_item(PlayActionButton("Fermer", "close", style=discord.ButtonStyle.secondary, row=3, emoji="\u2716\ufe0f"))
 
     async def open_page(self, interaction: discord.Interaction, page: str) -> None:
         if page == "close":
