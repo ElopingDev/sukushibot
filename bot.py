@@ -97,6 +97,7 @@ CHANGEJOB_FILE = Path("changejob.json")
 LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
 SLOTS_COOLDOWN_FILE = Path("slots_cooldowns.json")
+RAID_STATE_FILE = Path("raid_state.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
 RAID_OWNER_IDS = {863396251889303582, 885927546456272957}
@@ -728,6 +729,31 @@ def get_role_by_id(guild: discord.Guild | None, role_id: int) -> discord.Role | 
     if guild is None:
         return None
     return guild.get_role(role_id)
+
+
+def get_saved_raid_channel_ids(guild_id: int) -> set[int]:
+    data = load_json_dict(RAID_STATE_FILE)
+    raw_value = data.get(str(guild_id), "")
+    if not raw_value:
+        return set()
+
+    channel_ids: set[int] = set()
+    for part in raw_value.split(","):
+        try:
+            channel_ids.add(int(part))
+        except (TypeError, ValueError):
+            continue
+    return channel_ids
+
+
+def save_raid_channel_ids(guild_id: int, channel_ids: set[int]) -> None:
+    data = load_json_dict(RAID_STATE_FILE)
+    key = str(guild_id)
+    if channel_ids:
+        data[key] = ",".join(str(channel_id) for channel_id in sorted(channel_ids))
+    else:
+        data.pop(key, None)
+    save_json_dict(RAID_STATE_FILE, data)
 
 
 def member_has_role(member: discord.abc.User | discord.Member, role_id: int) -> bool:
@@ -6584,35 +6610,54 @@ async def raid(interaction: discord.Interaction) -> None:
 
     await interaction.response.defer(ephemeral=True, thinking=True)
 
-    currently_locked = False
-    for channel in interaction.guild.text_channels:
-        overwrite = channel.overwrites_for(interaction.guild.default_role)
-        if overwrite.send_messages is False:
-            currently_locked = True
-            break
-
-    target_send_messages = None if currently_locked else False
-    target_send_in_threads = None if currently_locked else False
-    target_add_reactions = None if currently_locked else False
-
+    saved_channel_ids = get_saved_raid_channel_ids(interaction.guild.id)
     updated_channels = 0
     failed_channels = 0
-    for channel in interaction.guild.text_channels:
-        overwrite = channel.overwrites_for(interaction.guild.default_role)
-        overwrite.send_messages = target_send_messages
-        overwrite.send_messages_in_threads = target_send_in_threads
-        overwrite.add_reactions = target_add_reactions
-        try:
-            await channel.set_permissions(
-                interaction.guild.default_role,
-                overwrite=overwrite,
-                reason=f"Raid toggle utilisé par {interaction.user}",
-            )
-            updated_channels += 1
-        except discord.HTTPException:
-            failed_channels += 1
+    if saved_channel_ids:
+        remaining_channel_ids: set[int] = set()
+        for channel_id in saved_channel_ids:
+            channel = interaction.guild.get_channel(channel_id)
+            if not isinstance(channel, discord.TextChannel):
+                continue
+            overwrite = channel.overwrites_for(interaction.guild.default_role)
+            overwrite.send_messages = None
+            overwrite.send_messages_in_threads = None
+            overwrite.add_reactions = None
+            try:
+                await channel.set_permissions(
+                    interaction.guild.default_role,
+                    overwrite=overwrite,
+                    reason=f"Raid toggle utilisé par {interaction.user}",
+                )
+                updated_channels += 1
+            except discord.HTTPException:
+                failed_channels += 1
+                remaining_channel_ids.add(channel_id)
+        save_raid_channel_ids(interaction.guild.id, remaining_channel_ids)
+        action_text = "retiré"
+    else:
+        locked_channel_ids: set[int] = set()
+        default_role = interaction.guild.default_role
+        for channel in interaction.guild.text_channels:
+            if not channel.permissions_for(default_role).send_messages:
+                continue
+            overwrite = channel.overwrites_for(default_role)
+            overwrite.send_messages = False
+            overwrite.send_messages_in_threads = False
+            overwrite.add_reactions = False
+            try:
+                await channel.set_permissions(
+                    default_role,
+                    overwrite=overwrite,
+                    reason=f"Raid toggle utilisé par {interaction.user}",
+                )
+                updated_channels += 1
+                locked_channel_ids.add(channel.id)
+            except discord.HTTPException:
+                failed_channels += 1
+        save_raid_channel_ids(interaction.guild.id, locked_channel_ids)
+        action_text = "activé"
 
-    action_text = "retiré" if currently_locked else "activé"
     result = f"Raid lock {action_text} sur **{updated_channels}** salon(s) texte."
     if failed_channels:
         result += f"\nÉchecs : **{failed_channels}** salon(s)."
