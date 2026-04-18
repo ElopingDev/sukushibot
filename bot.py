@@ -2378,6 +2378,33 @@ class SukushiBot(discord.Client):
         self.tree.clear_commands(guild=None)
         self.tree.clear_commands(guild=guild)
         self.tree.add_command(play, guild=guild, override=True)
+        for command in (
+            mute,
+            jail,
+            unmute,
+            kick,
+            ban,
+            tempban,
+            unban,
+            clear,
+            jaillist,
+            forceevent,
+            clearevent,
+            economystats,
+            lotterypanel,
+            rolepanel,
+            resetall,
+            resetallbal,
+            resetmoney,
+            staffgive,
+            give,
+            stafftake,
+            take,
+            ecoban,
+            ecounban,
+            raid,
+        ):
+            self.tree.add_command(command, guild=guild, override=True)
         synced = await self.tree.sync(guild=guild)
         print(f"Synced {len(synced)} command(s) to primary guild {PRIMARY_GUILD_ID}.")
 
@@ -6364,6 +6391,17 @@ async def staffgive(
     )
 
 
+
+
+@bot.tree.command(name="give", description="Ajoute de l'argent ? un utilisateur.")
+@prison_block(allow_staff_bypass=True)
+async def give(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    montant: app_commands.Range[int, 1, 1_000_000],
+) -> None:
+    await staffgive.callback(interaction, member, montant)
+
 @bot.tree.command(name="stafftake", description="Retire de l'argent à un utilisateur.")
 @prison_block(allow_staff_bypass=True)
 async def stafftake(
@@ -6391,6 +6429,17 @@ async def stafftake(
         ephemeral=True,
     )
 
+
+
+
+@bot.tree.command(name="take", description="Retire de l'argent ? un utilisateur.")
+@prison_block(allow_staff_bypass=True)
+async def take(
+    interaction: discord.Interaction,
+    member: discord.Member,
+    montant: app_commands.Range[int, 1, 1_000_000],
+) -> None:
+    await stafftake.callback(interaction, member, montant)
 
 @bot.tree.command(name="ecoban", description="Bannit un utilisateur des commandes économiques.")
 @prison_block(allow_staff_bypass=True)
