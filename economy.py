@@ -513,9 +513,10 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
             "challenge": "",
             "challenge_sent_at": None,
             "attempts": 0,
-            "variant": "normal",
+            "variant": "memory",
             "tax_amount": 0,
             "prompt_message_id": None,
+            "memory_progress": 0,
         }
 
     if not isinstance(raw_value, dict):
@@ -554,7 +555,7 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
 
     variant = raw_value.get("variant")
     if not isinstance(variant, str) or not variant:
-        variant = "normal"
+        variant = "memory"
 
     tax_amount = raw_value.get("tax_amount", 0)
     try:
@@ -571,6 +572,12 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
         except (TypeError, ValueError):
             prompt_message_id = None
 
+    memory_progress = raw_value.get("memory_progress", 0)
+    try:
+        memory_progress = max(0, int(memory_progress))
+    except (TypeError, ValueError):
+        memory_progress = 0
+
     return {
         "jailed_at": jailed_at,
         "reason": reason,
@@ -581,6 +588,7 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
         "variant": variant,
         "tax_amount": tax_amount,
         "prompt_message_id": prompt_message_id,
+        "memory_progress": memory_progress,
     }
 
 
@@ -686,6 +694,10 @@ def imprison_user(
         "challenge": challenge,
         "challenge_sent_at": challenge_sent_at,
         "attempts": 0,
+        "variant": "memory",
+        "tax_amount": 0,
+        "prompt_message_id": None,
+        "memory_progress": 0,
     }
     return set_prison_record(user_id, record)
 
