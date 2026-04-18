@@ -16,6 +16,7 @@ EVENT_FILE = Path("event.json")
 SLOTS_FILE = Path("slots.json")
 ECONOMY_STATS_FILE = Path("economy_stats.json")
 FACTIONS_FILE = Path("factions.json")
+COMBAT_FILE = Path("combat.json")
 DEFAULT_SLOTS_POT = 0
 
 
@@ -160,6 +161,240 @@ def load_json_dict(path: Path) -> dict[str, str]:
 def save_json_dict(path: Path, data: dict[str, str]) -> None:
     with path.open("w", encoding="utf-8") as file:
         json.dump(data, file, indent=2, ensure_ascii=False)
+
+
+def load_combat_state() -> dict[str, dict[str, object]]:
+    if not COMBAT_FILE.exists():
+        return {}
+
+    with COMBAT_FILE.open("r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    return data if isinstance(data, dict) else {}
+
+
+def save_combat_state(data: dict[str, dict[str, object]]) -> None:
+    with COMBAT_FILE.open("w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2, ensure_ascii=False)
+
+
+def _normalize_combat_profile(raw_value: object, *, max_energy: int) -> dict[str, object]:
+    energy = max_energy
+    last_refill_at = datetime.now(timezone.utc).isoformat()
+    force = 0
+    defense = 0
+    speed = 0
+
+    if isinstance(raw_value, dict):
+        try:
+            energy = max(0, min(max_energy, int(raw_value.get("energy", max_energy))))
+        except (TypeError, ValueError):
+            energy = max_energy
+
+        for stat_name in ("force", "defense", "speed"):
+            try:
+                value = max(0, int(raw_value.get(stat_name, 0)))
+            except (TypeError, ValueError):
+                value = 0
+            if stat_name == "force":
+                force = value
+            elif stat_name == "defense":
+                defense = value
+            else:
+                speed = value
+
+        raw_last_refill_at = raw_value.get("last_refill_at")
+        if isinstance(raw_last_refill_at, str):
+            try:
+                datetime.fromisoformat(raw_last_refill_at)
+                last_refill_at = raw_last_refill_at
+            except ValueError:
+                pass
+
+    return {
+        "energy": energy,
+        "last_refill_at": last_refill_at,
+        "force": force,
+        "defense": defense,
+        "speed": speed,
+    }
+
+
+def _get_refilled_combat_profile(
+    user_id: int,
+    *,
+    max_energy: int,
+    refill_amount: int,
+    refill_interval: timedelta,
+) -> tuple[dict[str, object], timedelta | None]:
+    data = load_combat_state()
+    key = str(user_id)
+    profile = _normalize_combat_profile(data.get(key), max_energy=max_energy)
+
+    now = datetime.now(timezone.utc)
+    try:
+        last_refill_at = datetime.fromisoformat(str(profile.get("last_refill_at", "")))
+    except ValueError:
+        last_refill_at = now
+
+    energy = int(profile.get("energy", max_energy))
+    if energy < max_energy:
+        elapsed = now - last_refill_at
+        if elapsed >= refill_interval:
+            ticks = int(elapsed.total_seconds() // refill_interval.total_seconds())
+            energy = min(max_energy, energy + ticks * refill_amount)
+            last_refill_at = last_refill_at + (refill_interval * ticks)
+
+    profile["energy"] = max(0, min(max_energy, energy))
+    profile["last_refill_at"] = last_refill_at.isoformat()
+    data[key] = profile
+    save_combat_state(data)
+
+    if energy >= max_energy:
+        return profile, None
+    next_refill_at = last_refill_at + refill_interval
+    return profile, max(timedelta(seconds=0), next_refill_at - now)
+
+
+def get_attack_energy_state(
+    user_id: int,
+    *,
+    max_energy: int,
+    refill_amount: int,
+    refill_interval: timedelta,
+) -> tuple[int, timedelta | None]:
+    profile, next_refill_in = _get_refilled_combat_profile(
+        user_id,
+        max_energy=max_energy,
+        refill_amount=refill_amount,
+        refill_interval=refill_interval,
+    )
+    return int(profile.get("energy", max_energy)), next_refill_in
+
+
+def spend_attack_energy(
+    user_id: int,
+    amount: int,
+    *,
+    max_energy: int,
+    refill_amount: int,
+    refill_interval: timedelta,
+) -> tuple[bool, int, timedelta | None]:
+    profile, next_refill_in = _get_refilled_combat_profile(
+        user_id,
+        max_energy=max_energy,
+        refill_amount=refill_amount,
+        refill_interval=refill_interval,
+    )
+    current_energy = int(profile.get("energy", max_energy))
+    if current_energy < amount:
+        return False, current_energy, next_refill_in
+
+    profile["energy"] = current_energy - amount
+    data = load_combat_state()
+    data[str(user_id)] = profile
+    save_combat_state(data)
+
+    refreshed_energy, refreshed_next_refill = get_attack_energy_state(
+        user_id,
+        max_energy=max_energy,
+        refill_amount=refill_amount,
+        refill_interval=refill_interval,
+    )
+    return True, refreshed_energy, refreshed_next_refill
+
+
+def get_combat_profile(
+    user_id: int,
+    *,
+    max_energy: int,
+    refill_amount: int,
+    refill_interval: timedelta,
+) -> dict[str, object]:
+    profile, _ = _get_refilled_combat_profile(
+        user_id,
+        max_energy=max_energy,
+        refill_amount=refill_amount,
+        refill_interval=refill_interval,
+    )
+    return profile
+
+
+def refill_combat_energy(
+    user_id: int,
+    *,
+    max_energy: int,
+    refill_amount: int,
+    refill_interval: timedelta,
+) -> dict[str, object]:
+    data = load_combat_state()
+    key = str(user_id)
+    profile = get_combat_profile(
+        user_id,
+        max_energy=max_energy,
+        refill_amount=refill_amount,
+        refill_interval=refill_interval,
+    )
+    profile["energy"] = max_energy
+    data[key] = profile
+    save_combat_state(data)
+    return profile
+
+
+def train_combat_stat(
+    user_id: int,
+    stat_name: str,
+    *,
+    energy_cost: int,
+    max_energy: int,
+    refill_amount: int,
+    refill_interval: timedelta,
+    stat_cap: int,
+) -> tuple[bool, dict[str, object], timedelta | None, str | None]:
+    if stat_name not in {"force", "defense", "speed"}:
+        profile, next_refill_in = _get_refilled_combat_profile(
+            user_id,
+            max_energy=max_energy,
+            refill_amount=refill_amount,
+            refill_interval=refill_interval,
+        )
+        return False, profile, next_refill_in, "Stat inconnue."
+
+    data = load_combat_state()
+    key = str(user_id)
+    profile, next_refill_in = _get_refilled_combat_profile(
+        user_id,
+        max_energy=max_energy,
+        refill_amount=refill_amount,
+        refill_interval=refill_interval,
+    )
+    current_energy = int(profile.get("energy", max_energy))
+    current_stat = int(profile.get(stat_name, 0))
+
+    if current_stat >= stat_cap:
+        return False, profile, next_refill_in, f"{stat_name} est déjà au maximum."
+    if current_energy < energy_cost:
+        return False, profile, next_refill_in, "Pas assez d'énergie."
+
+    profile["energy"] = current_energy - energy_cost
+    profile[stat_name] = current_stat + 1
+    data[key] = profile
+    save_combat_state(data)
+
+    refreshed_profile = get_combat_profile(
+        user_id,
+        max_energy=max_energy,
+        refill_amount=refill_amount,
+        refill_interval=refill_interval,
+    )
+    refreshed_energy, refreshed_next_refill = get_attack_energy_state(
+        user_id,
+        max_energy=max_energy,
+        refill_amount=refill_amount,
+        refill_interval=refill_interval,
+    )
+    refreshed_profile["energy"] = refreshed_energy
+    return True, refreshed_profile, refreshed_next_refill, None
 
 
 def load_lottery_state() -> dict[str, object]:

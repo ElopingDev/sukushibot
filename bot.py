@@ -19,8 +19,10 @@ from economy import (
     clear_faction_invite,
     ensure_minimum_balance,
     get_all_factions,
+    get_attack_energy_state,
     get_all_prison_records,
     get_balance_value,
+    get_combat_profile,
     get_cooldown_remaining,
     get_faction_by_owner,
     get_faction_for_member,
@@ -45,6 +47,7 @@ from economy import (
     reset_slots_pot,
     reset_cooldown_files,
     record_economy_stat,
+    refill_combat_energy,
     save_economy,
     save_economy_meta,
     save_event_state,
@@ -55,6 +58,7 @@ from economy import (
     set_prison_record,
     set_balance_value,
     set_job,
+    train_combat_stat,
     update_cooldown,
     update_pair_cooldown,
 )
@@ -97,6 +101,7 @@ LOTTERY_FILE = Path("lottery.json")
 ECOBAN_FILE = Path("ecoban.json")
 SLOTS_COOLDOWN_FILE = Path("slots_cooldowns.json")
 RAID_STATE_FILE = Path("raid_state.json")
+SHOP_REFILL_FILE = Path("shop_energy_refill.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
 RAID_OWNER_IDS = {863396251889303582, 885927546456272957}
@@ -107,6 +112,10 @@ DAILY_COOLDOWN = timedelta(days=1)
 WORK_COOLDOWN = timedelta(minutes=45)
 ATTACK_COOLDOWN = timedelta(hours=5)
 GLOBAL_ATTACK_COOLDOWN = timedelta(minutes=15)
+ATTACK_ENERGY_MAX = 25
+GYM_ENERGY_COST = 5
+ATTACK_ENERGY_REFILL_AMOUNT = 5
+ATTACK_ENERGY_REFILL_INTERVAL = timedelta(minutes=15)
 CHANGEJOB_COOLDOWN = timedelta(days=1)
 LOTTERY_DURATION = timedelta(hours=24)
 PRISON_CHANCE = 0.15
@@ -215,12 +224,18 @@ ECONOMY_STAT_LABELS = {
 }
 FACTION_TAG_PATTERN = re.compile(r"^[A-Za-z0-9]{1,4}$")
 ATTACK_STARTING_HP = 100
-ATTACK_PLAYER_HIT_CHANCE = 0.78
-ATTACK_AI_HIT_CHANCE = 0.55
-ATTACK_PLAYER_DAMAGE = (18, 32)
-ATTACK_AI_DAMAGE = (10, 20)
+ATTACK_BASE_HIT_CHANCE = 0.58
+ATTACK_HIT_SPEED_SCALING = 0.015
+ATTACK_DAMAGE_RANGE = (12, 20)
+ATTACK_FORCE_DAMAGE_SCALING = 1.3
+ATTACK_DEFENSE_REDUCTION_SCALING = 1.0
+ATTACK_HP_PER_LEVEL = 1
+ATTACK_MAX_LEVEL_BONUS_HP = 30
+GYM_STAT_CAP = 20
 ATTACK_STEAL_PERCENT = (0.1, 0.15)
 ACTIVE_ATTACK_USERS: set[int] = set()
+SHOP_ENERGY_REFILL_COST = 6000
+SHOP_ENERGY_REFILL_COOLDOWN = timedelta(hours=3)
 ACTIVE_MINES_USERS: set[int] = set()
 TICKET_OWNER_TOPIC_PREFIX = "ticket_owner:"
 PRISONER_TOPIC_PREFIX = "prisoner:"
@@ -1307,38 +1322,127 @@ def make_hp_bar(current_hp: int, max_hp: int = ATTACK_STARTING_HP, length: int =
     filled = round((current_hp / max_hp) * length)
     return f"{'█' * filled}{'░' * (length - filled)} {current_hp}/{max_hp}"
 
+def get_attack_energy_display(user_id: int) -> tuple[int, str]:
+    energy, next_refill = get_attack_energy_state(
+        user_id,
+        max_energy=ATTACK_ENERGY_MAX,
+        refill_amount=ATTACK_ENERGY_REFILL_AMOUNT,
+        refill_interval=ATTACK_ENERGY_REFILL_INTERVAL,
+    )
+    if next_refill is None:
+        suffix = "plein"
+    else:
+        suffix = f"+{ATTACK_ENERGY_REFILL_AMOUNT} dans {format_remaining_time(next_refill)}"
+    return energy, suffix
+
+
+def get_attack_stats(user_id: int) -> dict[str, int]:
+    level = int(get_level_profile(user_id).get("level", 1))
+    profile = get_combat_profile(
+        user_id,
+        max_energy=ATTACK_ENERGY_MAX,
+        refill_amount=ATTACK_ENERGY_REFILL_AMOUNT,
+        refill_interval=ATTACK_ENERGY_REFILL_INTERVAL,
+    )
+
+    return {
+        "force": int(profile.get("force", 0)),
+        "defense": int(profile.get("defense", 0)),
+        "speed": int(profile.get("speed", 0)),
+        "level": level,
+    }
+
+
+def get_attack_max_hp(user_id: int) -> int:
+    level = int(get_level_profile(user_id).get("level", 1))
+    bonus_hp = min(ATTACK_MAX_LEVEL_BONUS_HP, max(0, level - 1) * ATTACK_HP_PER_LEVEL)
+    return ATTACK_STARTING_HP + bonus_hp
+
+
+ATTACK_STAT_LABELS = {
+    "force": "Force",
+    "defense": "Défense",
+    "speed": "Vitesse",
+}
+
+
+def format_attack_stats(stats: dict[str, int]) -> str:
+    return (
+        f"\u2694\ufe0f Force **{stats['force']}**\n"
+        f"\U0001f6e1\ufe0f D\u00e9fense **{stats['defense']}**\n"
+        f"\U0001f4a8 Vitesse **{stats['speed']}**"
+    )
+
+
+def calculate_attack_hit_chance(attacker_stats: dict[str, int], defender_stats: dict[str, int]) -> float:
+    speed_delta = attacker_stats["speed"] - defender_stats["speed"]
+    chance = ATTACK_BASE_HIT_CHANCE + (speed_delta * ATTACK_HIT_SPEED_SCALING)
+    return max(0.38, min(0.86, chance))
+
+
+def roll_attack_damage(attacker_stats: dict[str, int], defender_stats: dict[str, int]) -> int:
+    raw_damage = random.randint(*ATTACK_DAMAGE_RANGE) + int(round(attacker_stats["force"] * ATTACK_FORCE_DAMAGE_SCALING))
+    reduction = int(round(defender_stats["defense"] * ATTACK_DEFENSE_REDUCTION_SCALING))
+    return max(6, raw_damage - reduction)
+
 
 class AttackView(discord.ui.View):
     def __init__(self, attacker: discord.Member, target: discord.Member) -> None:
         super().__init__(timeout=120)
         self.attacker = attacker
         self.target = target
-        self.attacker_hp = ATTACK_STARTING_HP
-        self.target_hp = ATTACK_STARTING_HP
+        self.attacker_max_hp = get_attack_max_hp(attacker.id)
+        self.target_max_hp = get_attack_max_hp(target.id)
+        self.attacker_hp = self.attacker_max_hp
+        self.target_hp = self.target_max_hp
+        self.attacker_stats = get_attack_stats(attacker.id)
+        self.target_stats = get_attack_stats(target.id)
         self.finished = False
+        self.round_number = 1
         self.message: discord.Message | None = None
-        self.log: list[str] = ["Le combat commence."]
+        self.log: list[str] = ["Le duel commence."]
+
+    def build_combatant_value(self, member: discord.Member, hp: int, stats: dict[str, int], *, ai_controlled: bool) -> str:
+        role_text = "IA d\u00e9fensive" if ai_controlled else "Joueur"
+        return (
+            f"{make_hp_bar(hp)}\n"
+            f"Niveau **{stats['level']}** \u2022 {role_text}\n"
+            f"{format_attack_stats(stats)}"
+        )
 
     def build_embed(self, result_text: str | None = None) -> discord.Embed:
+        attacker_hit = int(round(calculate_attack_hit_chance(self.attacker_stats, self.target_stats) * 100))
+        target_hit = int(round(calculate_attack_hit_chance(self.target_stats, self.attacker_stats) * 100))
         embed = make_embed(
-            "Attaque",
-            f"{self.attacker.mention} tente de détrousser **{self.target.display_name}**.",
+            "\u2694\ufe0f Attaque de rue",
+            (
+                f"{self.attacker.mention} tente de d\u00e9trousser **{self.target.display_name}**.\n"
+                f"Round **{self.round_number}** \u2022 Vol possible **{int(ATTACK_STEAL_PERCENT[0] * 100)}-{int(ATTACK_STEAL_PERCENT[1] * 100)}%**"
+            ),
             color=SUKUSHI_PINK,
             footer=f"Combat de {self.attacker.display_name}",
         )
         embed.add_field(
-            name=self.attacker.display_name,
-            value=make_hp_bar(self.attacker_hp),
-            inline=False,
+            name=f"\U0001f7e5 {self.attacker.display_name}",
+            value=self.build_combatant_value(self.attacker, self.attacker_hp, self.attacker_stats, ai_controlled=False),
+            inline=True,
         )
         embed.add_field(
-            name=f"{self.target.display_name} (IA)",
-            value=make_hp_bar(self.target_hp),
+            name=f"\U0001f7e6 {self.target.display_name}",
+            value=self.build_combatant_value(self.target, self.target_hp, self.target_stats, ai_controlled=True),
+            inline=True,
+        )
+        embed.add_field(
+            name="\U0001f3af Chances de toucher",
+            value=(
+                f"{self.attacker.display_name} : **{attacker_hit}%**\n"
+                f"{self.target.display_name} : **{target_hit}%**"
+            ),
             inline=False,
         )
-        embed.add_field(name="Journal", value="\n".join(self.log[-4:]), inline=False)
+        embed.add_field(name="\U0001f4dc Journal", value="\n".join(f"\u2022 {entry}" for entry in self.log[-5:]), inline=False)
         if result_text:
-            embed.add_field(name="Résultat", value=result_text, inline=False)
+            embed.add_field(name="\U0001f3c1 R\u00e9sultat", value=result_text, inline=False)
         return embed
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -1348,7 +1452,7 @@ class AttackView(discord.ui.View):
             return False
         if interaction.user.id != self.attacker.id:
             await interaction.response.send_message(
-                "Seul le joueur qui a lancé cette attaque peut utiliser ce bouton.",
+                "Seul le joueur qui a lanc\u00e9 cette attaque peut utiliser ce bouton.",
                 ephemeral=True,
             )
             return False
@@ -1362,7 +1466,7 @@ class AttackView(discord.ui.View):
             child.disabled = True
         if self.message is not None:
             await self.message.edit(
-                embed=self.build_embed("Combat expiré. Aucun argent n'a été volé."),
+                embed=self.build_embed("Combat expir\u00e9. Aucun argent n'a \u00e9t\u00e9 vol\u00e9."),
                 view=self,
             )
         ACTIVE_ATTACK_USERS.discard(self.attacker.id)
@@ -1383,11 +1487,11 @@ class AttackView(discord.ui.View):
                 new_attacker_balance = add_balance(self.attacker.id, amount)
                 record_economy_stat("attack_steal", amount)
                 result = (
-                    f"Tu as gagné le combat et volé **{amount} Sukushi Dollars** à {self.target.mention}.\n"
+                    f"Tu as gagn\u00e9 le combat et vol\u00e9 **{amount} Sukushi Dollars** \u00e0 {self.target.mention}.\n"
                     f"Nouveau solde : **{new_attacker_balance} Sukushi Dollars**."
                 )
             else:
-                result = f"Tu as gagné, mais {self.target.mention} n'avait rien à voler."
+                result = f"Tu as gagn\u00e9, mais {self.target.mention} n'avait rien \u00e0 voler."
         else:
             amount = max(1, int(attacker_balance * steal_ratio)) if attacker_balance > 0 else 0
             if amount > 0:
@@ -1395,11 +1499,11 @@ class AttackView(discord.ui.View):
                 new_target_balance = add_balance(self.target.id, amount)
                 record_economy_stat("attack_steal", amount)
                 result = (
-                    f"Tu as perdu le combat. **{amount} Sukushi Dollars** ont été récupérés par {self.target.mention}.\n"
+                    f"Tu as perdu le combat. **{amount} Sukushi Dollars** ont \u00e9t\u00e9 r\u00e9cup\u00e9r\u00e9s par {self.target.mention}.\n"
                     f"Nouveau solde de la cible : **{new_target_balance} Sukushi Dollars**."
                 )
             else:
-                result = "Tu as perdu le combat, mais tu n'avais rien à perdre."
+                result = "Tu as perdu le combat, mais tu n'avais rien \u00e0 perdre."
 
         for child in self.children:
             child.disabled = True
@@ -1412,7 +1516,7 @@ class AttackView(discord.ui.View):
         ACTIVE_ATTACK_USERS.discard(self.target.id)
         self.stop()
 
-    @discord.ui.button(label="Attaquer", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="Frapper", style=discord.ButtonStyle.danger, emoji="\u2694\ufe0f")
     async def attack_button(
         self,
         interaction: discord.Interaction,
@@ -1421,21 +1525,21 @@ class AttackView(discord.ui.View):
         if self.finished:
             return
 
-        if random.random() <= ATTACK_PLAYER_HIT_CHANCE:
-            damage = random.randint(*ATTACK_PLAYER_DAMAGE)
+        if random.random() <= calculate_attack_hit_chance(self.attacker_stats, self.target_stats):
+            damage = roll_attack_damage(self.attacker_stats, self.target_stats)
             self.target_hp = max(0, self.target_hp - damage)
-            self.log.append(f"Tu touches {self.target.display_name} pour **{damage}** dégâts.")
+            self.log.append(f"Tu touches {self.target.display_name} pour **{damage}** d\u00e9g\u00e2ts.")
         else:
-            self.log.append("Tu rates ton attaque.")
+            self.log.append(f"Tu rates ton coup contre {self.target.display_name}.")
 
         if self.target_hp <= 0:
             await self.finish_combat(interaction, attacker_won=True)
             return
 
-        if random.random() <= ATTACK_AI_HIT_CHANCE:
-            damage = random.randint(*ATTACK_AI_DAMAGE)
+        if random.random() <= calculate_attack_hit_chance(self.target_stats, self.attacker_stats):
+            damage = roll_attack_damage(self.target_stats, self.attacker_stats)
             self.attacker_hp = max(0, self.attacker_hp - damage)
-            self.log.append(f"{self.target.display_name} te touche pour **{damage}** dégâts.")
+            self.log.append(f"{self.target.display_name} te contre pour **{damage}** d\u00e9g\u00e2ts.")
         else:
             self.log.append(f"{self.target.display_name} rate sa contre-attaque.")
 
@@ -1443,6 +1547,7 @@ class AttackView(discord.ui.View):
             await self.finish_combat(interaction, attacker_won=False)
             return
 
+        self.round_number += 1
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
 
@@ -3854,11 +3959,11 @@ async def run_work_action(interaction: discord.Interaction) -> None:
 
 async def run_attack_action(interaction: discord.Interaction, cible: discord.Member) -> None:
     if not isinstance(interaction.user, discord.Member):
-        await interaction.response.send_message("Cette commande doit être utilisée dans le serveur.", ephemeral=True)
+        await interaction.response.send_message("Cette commande doit ?tre utilis?e dans le serveur.", ephemeral=True)
         return
     attacker = interaction.user
     if cible.id == attacker.id:
-        await interaction.response.send_message("Tu ne peux pas t'attaquer toi-même.", ephemeral=True)
+        await interaction.response.send_message("Tu ne peux pas t'attaquer toi-m?me.", ephemeral=True)
         return
     if cible.bot:
         await interaction.response.send_message("Tu ne peux pas attaquer un bot.", ephemeral=True)
@@ -3882,13 +3987,13 @@ async def run_attack_action(interaction: discord.Interaction, cible: discord.Mem
             return
     if attacker.id in ACTIVE_ATTACK_USERS or cible.id in ACTIVE_ATTACK_USERS:
         await interaction.response.send_message(
-            "Un de ces joueurs est déjà dans un combat. Attends la fin du duel en cours.",
+            "Un de ces joueurs est d?j? dans un combat. Attends la fin du duel en cours.",
             ephemeral=True,
         )
         return
     if is_in_prison(cible.id):
         await interaction.response.send_message(
-            f"{cible.mention} est déjà en prison et doit finir son épreuve avant de pouvoir rejouer.",
+            f"{cible.mention} est d?j? en prison et doit finir son ?preuve avant de pouvoir rejouer.",
             ephemeral=True,
         )
         return
@@ -3904,13 +4009,13 @@ async def run_attack_action(interaction: discord.Interaction, cible: discord.Mem
     cooldown_remaining = get_pair_cooldown_remaining(ATTACK_FILE, attacker.id, cible.id, ATTACK_COOLDOWN)
     if cooldown_remaining is not None:
         await interaction.response.send_message(
-            f"Tu dois attendre **{format_remaining_time(cooldown_remaining)}** avant de réattaquer {cible.mention}.",
+            f"Tu dois attendre **{format_remaining_time(cooldown_remaining)}** avant de r?attaquer {cible.mention}.",
             ephemeral=True,
         )
         return
     if get_balance_value(attacker.id) <= 0 and get_balance_value(cible.id) <= 0:
         await interaction.response.send_message(
-            "Aucun de vous deux n'a assez d'argent pour que cette attaque serve à quelque chose.",
+            "Aucun de vous deux n'a assez d'argent pour que cette attaque serve ? quelque chose.",
             ephemeral=True,
         )
         return
@@ -3921,6 +4026,112 @@ async def run_attack_action(interaction: discord.Interaction, cible: discord.Mem
     await interaction.response.send_message(content=cible.mention, embed=view.build_embed(), view=view)
     view.message = await interaction.original_response()
 
+
+async def run_gym_train_action(interaction: discord.Interaction, stat_name: str) -> None:
+    stat_label = ATTACK_STAT_LABELS.get(stat_name)
+    if stat_label is None:
+        await interaction.response.send_message("Stat inconnue.", ephemeral=True)
+        return
+
+    success, profile, next_refill, error_message = train_combat_stat(
+        interaction.user.id,
+        stat_name,
+        energy_cost=GYM_ENERGY_COST,
+        max_energy=ATTACK_ENERGY_MAX,
+        refill_amount=ATTACK_ENERGY_REFILL_AMOUNT,
+        refill_interval=ATTACK_ENERGY_REFILL_INTERVAL,
+        stat_cap=GYM_STAT_CAP,
+    )
+    energy_value = int(profile.get("energy", ATTACK_ENERGY_MAX))
+    refill_text = "Énergie pleine."
+    if next_refill is not None:
+        refill_text = f"+{ATTACK_ENERGY_REFILL_AMOUNT} dans **{format_remaining_time(next_refill)}**"
+
+    if not success:
+        if error_message == "Pas assez d'énergie.":
+            message = (
+                f"Tu n'as pas assez d'énergie pour entraîner **{stat_label}**.\n"
+                f"Énergie actuelle : **{energy_value}/{ATTACK_ENERGY_MAX}**.\n"
+                f"Chaque séance coûte **{GYM_ENERGY_COST}** énergie.\n"
+                f"Prochaine recharge : {refill_text}."
+            )
+        elif error_message and "maximum" in error_message:
+            message = f"**{stat_label}** est d?j? au maximum (**{GYM_STAT_CAP}**)."
+        else:
+            message = error_message or "Impossible d'entraîner cette stat."
+        await interaction.response.edit_message(
+            embed=build_play_embed(interaction.user, "gym"),
+            view=PlayHubView(interaction.user.id, "gym"),
+        )
+        await interaction.followup.send(message, ephemeral=True)
+        return
+
+    new_value = int(profile.get(stat_name, 0))
+    await interaction.response.edit_message(
+        embed=build_play_embed(interaction.user, "gym"),
+        view=PlayHubView(interaction.user.id, "gym"),
+    )
+    await interaction.followup.send(
+        (
+            f"Entra?nement r?ussi : **{stat_label}** passe ? **{new_value}**.\n"
+            f"Énergie restante : **{energy_value}/{ATTACK_ENERGY_MAX}**.\n"
+            f"Prochaine recharge : {refill_text}."
+        ),
+        ephemeral=True,
+    )
+
+
+async def run_buy_energy_refill_action(interaction: discord.Interaction) -> None:
+    remaining = get_cooldown_remaining(SHOP_REFILL_FILE, interaction.user.id, SHOP_ENERGY_REFILL_COOLDOWN)
+    if remaining is not None:
+        await interaction.response.edit_message(
+            embed=build_play_embed(interaction.user, "shop"),
+            view=PlayHubView(interaction.user.id, "shop"),
+        )
+        await interaction.followup.send(
+            f"Tu as déjà acheté cette recharge récemment. Cooldown restant : **{format_remaining_time(remaining)}**.",
+            ephemeral=True,
+        )
+        return
+
+    ensure_minimum_balance(interaction.user.id)
+    current_balance = get_balance_value(interaction.user.id)
+    if current_balance < SHOP_ENERGY_REFILL_COST:
+        await interaction.response.edit_message(
+            embed=build_play_embed(interaction.user, "shop"),
+            view=PlayHubView(interaction.user.id, "shop"),
+        )
+        await interaction.followup.send(
+            (
+                f"Tu n'as pas assez d'argent pour acheter cette recharge.\n"
+                f"Prix : **{SHOP_ENERGY_REFILL_COST} Sukushi Dollars**.\n"
+                f"Solde actuel : **{current_balance} Sukushi Dollars**."
+            ),
+            ephemeral=True,
+        )
+        return
+
+    new_balance = set_balance_value(interaction.user.id, current_balance - SHOP_ENERGY_REFILL_COST)
+    refill_combat_energy(
+        interaction.user.id,
+        max_energy=ATTACK_ENERGY_MAX,
+        refill_amount=ATTACK_ENERGY_REFILL_AMOUNT,
+        refill_interval=ATTACK_ENERGY_REFILL_INTERVAL,
+    )
+    update_cooldown(SHOP_REFILL_FILE, interaction.user.id)
+
+    await interaction.response.edit_message(
+        embed=build_play_embed(interaction.user, "shop"),
+        view=PlayHubView(interaction.user.id, "shop"),
+    )
+    await interaction.followup.send(
+        (
+            f"Recharge d'énergie achetée.\n"
+            f"Ton énergie est maintenant à **{ATTACK_ENERGY_MAX}/{ATTACK_ENERGY_MAX}**.\n"
+            f"Nouveau solde : **{new_balance} Sukushi Dollars**."
+        ),
+        ephemeral=True,
+    )
 
 async def run_blackjack_action(interaction: discord.Interaction, mise: int) -> None:
     ensure_minimum_balance(interaction.user.id)
@@ -4124,12 +4335,14 @@ async def ensure_panel_access(interaction: discord.Interaction) -> bool:
     return True
 
 
-PLAY_PAGES = ["home", "economy", "casino", "crime", "faction", "faction_manage", "faction_allies"]
+PLAY_PAGES = ["home", "economy", "casino", "crime", "gym", "shop", "faction", "faction_manage", "faction_allies"]
 PLAY_PAGE_TITLES = {
     "home": "Play Hub",
     "economy": "Économie",
     "casino": "Casino",
     "crime": "Crime",
+    "gym": "Gym",
+    "shop": "Shop",
     "faction": "Faction",
     "faction_manage": "Faction | Gestion",
     "faction_allies": "Faction | Alliances",
@@ -4139,6 +4352,8 @@ PLAY_PAGE_DESCRIPTIONS = {
     "economy": "Tout ce qui touche à ton argent, tes gains et les classements.",
     "casino": "Jeux de hasard et prises de risque.",
     "crime": "Travail, métier et attaques.",
+    "gym": "Améliore tes stats de combat avec ton énergie.",
+    "shop": "Achète des objets utiles pour ta progression.",
     "faction": "Vue générale de ta faction et actions principales.",
     "faction_manage": "Tout ce qu'il faut pour gérer les membres et le rôle de ta faction.",
     "faction_allies": "Alliances, salons partagés et fin de faction.",
@@ -4146,6 +4361,9 @@ PLAY_PAGE_DESCRIPTIONS = {
 
 
 def build_play_embed(member: discord.abc.User | discord.Member, page: str) -> discord.Embed:
+    combat_stats = get_attack_stats(member.id)
+    attack_energy, energy_suffix = get_attack_energy_display(member.id)
+    max_hp = get_attack_max_hp(member.id)
     embed = make_embed(
         PLAY_PAGE_TITLES.get(page, "Play Hub"),
         PLAY_PAGE_DESCRIPTIONS.get(page, "Choisis une catégorie."),
@@ -4155,16 +4373,66 @@ def build_play_embed(member: discord.abc.User | discord.Member, page: str) -> di
     embed.set_author(name=f"Interface de {member.display_name}")
 
     if page == "home":
+        embed.add_field(
+            name="Gym",
+            value=(
+                f"⚡ Énergie **{attack_energy}/{ATTACK_ENERGY_MAX}** • {energy_suffix}\n"
+                f"❤️ PV max **{max_hp}**\n"
+                f"{format_attack_stats(combat_stats)}"
+            ),
+            inline=False,
+        )
         embed.add_field(name="Économie", value="Solde, daily, paiements et classements.", inline=False)
         embed.add_field(name="Casino", value="Blackjack, coinflip, slots et mines.", inline=False)
-        embed.add_field(name="Crime", value="Travail, métier et attaques.", inline=False)
+        embed.add_field(name="Crime", value="Travail, métier, gym et attaques.", inline=False)
+        embed.add_field(name="Shop", value="Recharge ton énergie et achète les futurs objets utiles.", inline=False)
         embed.add_field(name="Faction", value="Créer, gérer et faire vivre ta faction.", inline=False)
     elif page == "economy":
         embed.add_field(name="Actions", value="`Solde` `Daily` `Payer` `Riches` `Niveaux`", inline=False)
     elif page == "casino":
         embed.add_field(name="Actions", value="`Blackjack` `Coinflip` `Slots` `Mines`", inline=False)
     elif page == "crime":
-        embed.add_field(name="Actions", value="`Work` `Choisir métier` `Changer métier` `Attaquer`", inline=False)
+        embed.add_field(name="Actions", value="`Work` `Choisir métier` `Changer métier` `Attaquer` `Gym`", inline=False)
+        embed.add_field(
+            name="Combat",
+            value=(
+                f"❤️ PV max **{max_hp}**\n"
+                f"{format_attack_stats(combat_stats)}"
+            ),
+            inline=False,
+        )
+    elif page == "gym":
+        embed.add_field(
+            name="Salle de sport",
+            value=(
+                f"⚡ Énergie **{attack_energy}/{ATTACK_ENERGY_MAX}** • {energy_suffix}\n"
+                f"Chaque entraînement coûte **{GYM_ENERGY_COST}** énergie.\n"
+                f"Cap par stat : **{GYM_STAT_CAP}**"
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="Tes stats",
+            value=(
+                f"❤️ PV max **{max_hp}**\n"
+                f"{format_attack_stats(combat_stats)}"
+            ),
+            inline=False,
+        )
+    elif page == "shop":
+        embed.add_field(
+            name="Boutique",
+            value=(
+                f"`Recharge énergie` • **{SHOP_ENERGY_REFILL_COST} Sukushi Dollars**\n"
+                f"Remplit toute ton énergie. Achat limité à une fois toutes les **3 heures**."
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name="État",
+            value=f"⚡ Énergie actuelle : **{attack_energy}/{ATTACK_ENERGY_MAX}**",
+            inline=False,
+        )
     elif page == "faction":
         embed.add_field(name="Actions", value="`Ma faction` `Classement` `Créer` `Rejoindre` `Quitter`", inline=False)
     elif page == "faction_manage":
@@ -4390,52 +4658,64 @@ class PlayHubView(OwnerRestrictedView):
     def build_items(self) -> None:
         self.clear_items()
         if self.page == "home":
-            self.add_item(PlayActionButton("Économie", "goto:economy", style=discord.ButtonStyle.primary, row=0, emoji="💰"))
-            self.add_item(PlayActionButton("Casino", "goto:casino", style=discord.ButtonStyle.primary, row=0, emoji="🎰"))
-            self.add_item(PlayActionButton("Crime", "goto:crime", style=discord.ButtonStyle.primary, row=0, emoji="⚔️"))
-            self.add_item(PlayActionButton("Faction", "goto:faction", style=discord.ButtonStyle.primary, row=0, emoji="🏴"))
-            self.add_item(PlayActionButton("Fermer", "close", style=discord.ButtonStyle.secondary, row=1, emoji="✖️"))
+            self.add_item(PlayActionButton("?conomie", "goto:economy", style=discord.ButtonStyle.primary, row=0, emoji="??"))
+            self.add_item(PlayActionButton("Casino", "goto:casino", style=discord.ButtonStyle.primary, row=0, emoji="??"))
+            self.add_item(PlayActionButton("Crime", "goto:crime", style=discord.ButtonStyle.primary, row=0, emoji="??"))
+            self.add_item(PlayActionButton("Gym", "goto:gym", style=discord.ButtonStyle.success, row=1, emoji="???"))
+            self.add_item(PlayActionButton("Shop", "goto:shop", style=discord.ButtonStyle.success, row=1, emoji="??"))
+            self.add_item(PlayActionButton("Faction", "goto:faction", style=discord.ButtonStyle.primary, row=1, emoji="??"))
+            self.add_item(PlayActionButton("Fermer", "close", style=discord.ButtonStyle.secondary, row=2, emoji="??"))
             return
 
         page_actions: dict[str, list[tuple[str, str, discord.ButtonStyle, str | None]]] = {
             "economy": [
-                ("Solde", "balance", discord.ButtonStyle.secondary, "💰"),
-                ("Daily", "daily", discord.ButtonStyle.success, "🪙"),
-                ("Payer", "pay", discord.ButtonStyle.primary, "💸"),
-                ("Riches", "leaderboard", discord.ButtonStyle.secondary, "🏆"),
-                ("Niveaux", "levelleaderboard", discord.ButtonStyle.secondary, "📈"),
+                ("Solde", "balance", discord.ButtonStyle.secondary, "??"),
+                ("Daily", "daily", discord.ButtonStyle.success, "??"),
+                ("Payer", "pay", discord.ButtonStyle.primary, "??"),
+                ("Riches", "leaderboard", discord.ButtonStyle.secondary, "??"),
+                ("Niveaux", "levelleaderboard", discord.ButtonStyle.secondary, "??"),
+                ("Shop", "goto:shop", discord.ButtonStyle.success, "??"),
             ],
             "casino": [
-                ("Blackjack", "blackjack", discord.ButtonStyle.primary, "🃏"),
-                ("Coinflip", "coinflip", discord.ButtonStyle.primary, "🪙"),
-                ("Slots", "slots", discord.ButtonStyle.primary, "🎰"),
-                ("Mines", "mines", discord.ButtonStyle.primary, "💣"),
+                ("Blackjack", "blackjack", discord.ButtonStyle.primary, "??"),
+                ("Coinflip", "coinflip", discord.ButtonStyle.primary, "??"),
+                ("Slots", "slots", discord.ButtonStyle.primary, "??"),
+                ("Mines", "mines", discord.ButtonStyle.primary, "??"),
             ],
             "crime": [
-                ("Work", "work", discord.ButtonStyle.primary, "💼"),
+                ("Work", "work", discord.ButtonStyle.primary, "??"),
                 ("Choisir métier", "getjob", discord.ButtonStyle.secondary, "🕵️"),
                 ("Changer métier", "changejob", discord.ButtonStyle.secondary, "🔁"),
-                ("Attaquer", "attack", discord.ButtonStyle.danger, "⚔️"),
+                ("Attaquer", "attack", discord.ButtonStyle.danger, "??"),
+                ("Gym", "goto:gym", discord.ButtonStyle.success, "???"),
+            ],
+            "gym": [
+                ("Force", "train:force", discord.ButtonStyle.danger, "??"),
+                ("D?fense", "train:defense", discord.ButtonStyle.primary, "???"),
+                ("Vitesse", "train:speed", discord.ButtonStyle.success, "??"),
+            ],
+            "shop": [
+                ("Recharge énergie", "buy:energy_refill", discord.ButtonStyle.success, "⚡"),
             ],
             "faction": [
-                ("Ma faction", "faction", discord.ButtonStyle.secondary, "🏴"),
-                ("Classement", "fleaderboard", discord.ButtonStyle.secondary, "🏆"),
+                ("Ma faction", "faction", discord.ButtonStyle.secondary, "??"),
+                ("Classement", "fleaderboard", discord.ButtonStyle.secondary, "??"),
                 ("Créer", "createfaction", discord.ButtonStyle.primary, "➕"),
-                ("Rejoindre", "joinfaction", discord.ButtonStyle.success, "✅"),
-                ("Quitter", "leavefaction", discord.ButtonStyle.danger, "🚪"),
+                ("Rejoindre", "joinfaction", discord.ButtonStyle.success, "?"),
+                ("Quitter", "leavefaction", discord.ButtonStyle.danger, "??"),
             ],
             "faction_manage": [
-                ("Tag", "setfactiontag", discord.ButtonStyle.secondary, "🏷️"),
-                ("Inviter", "invitefaction", discord.ButtonStyle.primary, "📨"),
-                ("Promouvoir", "promotefaction", discord.ButtonStyle.primary, "⬆️"),
-                ("Salon faction", "createfactionchannel", discord.ButtonStyle.secondary, "💬"),
-                ("Ping faction", "pingfaction", discord.ButtonStyle.secondary, "📢"),
+                ("Tag", "setfactiontag", discord.ButtonStyle.secondary, "???"),
+                ("Inviter", "invitefaction", discord.ButtonStyle.primary, "??"),
+                ("Promouvoir", "promotefaction", discord.ButtonStyle.primary, "??"),
+                ("Salon faction", "createfactionchannel", discord.ButtonStyle.secondary, "??"),
+                ("Ping faction", "pingfaction", discord.ButtonStyle.secondary, "??"),
             ],
             "faction_allies": [
-                ("Alliance", "ally", discord.ButtonStyle.primary, "🤝"),
-                ("Rompre", "disbandally", discord.ButtonStyle.danger, "💥"),
+                ("Alliance", "ally", discord.ButtonStyle.primary, "??"),
+                ("Rompre", "disbandally", discord.ButtonStyle.danger, "??"),
                 ("Salon allié", "createallychannel", discord.ButtonStyle.secondary, "🔗"),
-                ("Dissoudre", "disbandfaction", discord.ButtonStyle.danger, "🗑️"),
+                ("Dissoudre", "disbandfaction", discord.ButtonStyle.danger, "???"),
             ],
         }
 
@@ -4470,6 +4750,22 @@ class PlayHubView(OwnerRestrictedView):
             await self.open_page(interaction, action.split(":", 1)[1])
             return
 
+        if action.startswith("train:"):
+            if not await ensure_panel_access(interaction):
+                return
+            if not await ensure_not_in_faction_chat(interaction):
+                return
+            await run_gym_train_action(interaction, action.split(":", 1)[1])
+            return
+
+        if action == "buy:energy_refill":
+            if not await ensure_panel_access(interaction):
+                return
+            if not await ensure_not_in_faction_chat(interaction):
+                return
+            await run_buy_energy_refill_action(interaction)
+            return
+
         if not await ensure_panel_access(interaction):
             return
 
@@ -4483,10 +4779,14 @@ class PlayHubView(OwnerRestrictedView):
             "coinflip",
             "slots",
             "mines",
+            "buy:energy_refill",
             "work",
             "getjob",
             "changejob",
             "attack",
+            "train:force",
+            "train:defense",
+            "train:speed",
         }
         if action in faction_blocked_actions and not await ensure_not_in_faction_chat(interaction):
             return
