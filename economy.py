@@ -743,6 +743,7 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
     if isinstance(raw_value, str):
         return {
             "jailed_at": raw_value,
+            "last_tax_at": raw_value,
             "reason": "",
             "channel_id": None,
             "challenge": "",
@@ -760,6 +761,10 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
     jailed_at = raw_value.get("jailed_at")
     if not isinstance(jailed_at, str):
         jailed_at = datetime.now(timezone.utc).isoformat()
+
+    last_tax_at = raw_value.get("last_tax_at")
+    if not isinstance(last_tax_at, str):
+        last_tax_at = jailed_at
 
     reason = raw_value.get("reason")
     if not isinstance(reason, str):
@@ -815,6 +820,7 @@ def _normalize_prison_record(raw_value: object) -> dict[str, object] | None:
 
     return {
         "jailed_at": jailed_at,
+        "last_tax_at": last_tax_at,
         "reason": reason,
         "channel_id": channel_id,
         "challenge": challenge,
@@ -924,6 +930,7 @@ def imprison_user(
     del duration
     record = {
         "jailed_at": datetime.now(timezone.utc).isoformat(),
+        "last_tax_at": datetime.now(timezone.utc).isoformat(),
         "reason": reason,
         "channel_id": channel_id,
         "challenge": challenge,

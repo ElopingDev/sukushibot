@@ -124,6 +124,8 @@ LOTTERY_PRIZE = 10000
 JAIL_CATEGORY_NAME = "prison"
 JAIL_CHANNEL_PREFIX = "cellule"
 JAIL_FAILURE_PERCENT = 0.05
+JAIL_PERIODIC_LOSS_PERCENT = 0.10
+JAIL_PERIODIC_LOSS_INTERVAL = timedelta(minutes=30)
 JAIL_TAX_PERCENT_RANGE = (0.05, 0.12)
 JAIL_VARIANTS = ("memory", "wires")
 JAIL_MEMORY_EMOJIS = ("🍎", "🔒", "💎", "💣", "🍋", "🎲", "⭐", "❤️")
@@ -234,6 +236,7 @@ ATTACK_MAX_LEVEL_BONUS_HP = 30
 GYM_STAT_CAP = 20
 ATTACK_STEAL_PERCENT = (0.1, 0.15)
 ACTIVE_ATTACK_USERS: set[int] = set()
+ACTIVE_ATTACK_COMMAND_USERS: set[int] = set()
 SHOP_ENERGY_REFILL_COST = 6000
 SHOP_ENERGY_REFILL_COOLDOWN = timedelta(hours=3)
 ACTIVE_MINES_USERS: set[int] = set()
@@ -376,6 +379,18 @@ async def ensure_not_in_prison(
     return False
 
 
+async def ensure_not_attacking(interaction: discord.Interaction) -> bool:
+    if interaction.user.id not in ACTIVE_ATTACK_COMMAND_USERS:
+        return True
+
+    message_text = "Tu es déjà en train de mener une attaque. Termine d'abord le combat en cours."
+    if interaction.response.is_done():
+        await interaction.followup.send(message_text, ephemeral=True)
+    else:
+        await interaction.response.send_message(message_text, ephemeral=True)
+    return False
+
+
 async def ensure_not_ecobanned(interaction: discord.Interaction) -> bool:
     if is_ecobanned(interaction.user.id):
         if interaction.response.is_done():
@@ -434,6 +449,8 @@ async def ensure_not_in_faction_chat(interaction: discord.Interaction) -> bool:
 
 def prison_block(*, allow_staff_bypass: bool = False):
     async def predicate(interaction: discord.Interaction) -> bool:
+        if not await ensure_not_attacking(interaction):
+            return False
         return await ensure_not_in_prison(
             interaction,
             allow_staff_bypass=allow_staff_bypass,
@@ -444,6 +461,8 @@ def prison_block(*, allow_staff_bypass: bool = False):
 
 def economy_block():
     async def predicate(interaction: discord.Interaction) -> bool:
+        if not await ensure_not_attacking(interaction):
+            return False
         if not await ensure_not_ecobanned(interaction):
             return False
         return await ensure_not_in_faction_chat(interaction)
@@ -1483,15 +1502,33 @@ class AttackView(discord.ui.View):
         if self.finished:
             return
         self.finished = True
+        update_pair_cooldown(ATTACK_FILE, self.attacker.id, self.target.id)
+
+        attacker_balance = get_balance_value(self.attacker.id)
+        steal_ratio = random.uniform(*ATTACK_STEAL_PERCENT)
+        amount = max(1, int(attacker_balance * steal_ratio)) if attacker_balance > 0 else 0
+        if amount > 0:
+            set_balance_value(self.attacker.id, attacker_balance - amount)
+            new_target_balance = add_balance(self.target.id, amount)
+            record_economy_stat("attack_steal", amount)
+            result = (
+                f"Combat expiré: **{amount} Sukushi Dollars** ont été récupérés par {self.target.mention}.\n"
+                f"Nouveau solde de la cible : **{new_target_balance} Sukushi Dollars**."
+            )
+        else:
+            result = "Combat expiré: tu perds automatiquement, mais tu n'avais rien à perdre."
+
         for child in self.children:
             child.disabled = True
         if self.message is not None:
             await self.message.edit(
-                embed=self.build_embed("Combat expir\u00e9. Aucun argent n'a \u00e9t\u00e9 vol\u00e9."),
+                embed=self.build_embed(result),
                 view=self,
             )
         ACTIVE_ATTACK_USERS.discard(self.attacker.id)
         ACTIVE_ATTACK_USERS.discard(self.target.id)
+        ACTIVE_ATTACK_COMMAND_USERS.discard(self.attacker.id)
+        self.stop()
 
     async def finish_combat(self, interaction: discord.Interaction, *, attacker_won: bool) -> None:
         self.finished = True
@@ -1535,6 +1572,7 @@ class AttackView(discord.ui.View):
         )
         ACTIVE_ATTACK_USERS.discard(self.attacker.id)
         ACTIVE_ATTACK_USERS.discard(self.target.id)
+        ACTIVE_ATTACK_COMMAND_USERS.discard(self.attacker.id)
         self.stop()
 
     @discord.ui.button(label="Frapper", style=discord.ButtonStyle.danger, emoji="\u2694\ufe0f")
@@ -2594,16 +2632,22 @@ class PrisonWireView(PrisonBaseView):
         await bot_client.handle_wire_prison_choice(interaction, button.wire_label)
 
 
+class SukushiCommandTree(app_commands.CommandTree):
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        return await ensure_not_attacking(interaction)
+
+
 class SukushiBot(discord.Client):
     def __init__(self) -> None:
         intents = discord.Intents.default()
         intents.members = True
         intents.message_content = True
         super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
+        self.tree = SukushiCommandTree(self)
         self.tempban_tasks: dict[tuple[int, int], asyncio.Task[None]] = {}
         self.lottery_task: asyncio.Task[None] | None = None
         self.random_event_task: asyncio.Task[None] | None = None
+        self.prison_tax_task: asyncio.Task[None] | None = None
         self.next_auto_event_at: datetime | None = None
         self.restored_tempbans = False
 
@@ -2653,6 +2697,8 @@ class SukushiBot(discord.Client):
                 await sync_faction_role_members(primary_guild, owner_id)
         if self.random_event_task is None or self.random_event_task.done():
             self.random_event_task = asyncio.create_task(self.run_random_event_loop())
+        if self.prison_tax_task is None or self.prison_tax_task.done():
+            self.prison_tax_task = asyncio.create_task(self.run_prison_tax_loop())
         if not self.restored_tempbans:
             await self.restore_tempbans()
             self.restored_tempbans = True
@@ -2783,6 +2829,7 @@ class SukushiBot(discord.Client):
 
         previous_record = get_prison_record(member.id)
         jailed_at = datetime.now(timezone.utc).isoformat()
+        last_tax_at = jailed_at
         attempts = 0
         stored_variant = choose_prison_variant()
         tax_amount = 0
@@ -2791,6 +2838,9 @@ class SukushiBot(discord.Client):
             previous_jailed_at = previous_record.get("jailed_at")
             if isinstance(previous_jailed_at, str):
                 jailed_at = previous_jailed_at
+            previous_last_tax_at = previous_record.get("last_tax_at")
+            if isinstance(previous_last_tax_at, str):
+                last_tax_at = previous_last_tax_at
             try:
                 attempts = int(previous_record.get("attempts", 0))
             except (TypeError, ValueError):
@@ -2825,6 +2875,7 @@ class SukushiBot(discord.Client):
             member.id,
             {
                 "jailed_at": jailed_at,
+                "last_tax_at": last_tax_at,
                 "reason": reason,
                 "channel_id": channel.id,
                 "challenge": challenge,
@@ -2865,6 +2916,7 @@ class SukushiBot(discord.Client):
             member.id,
             {
                 "jailed_at": datetime.now(timezone.utc).isoformat(),
+                "last_tax_at": datetime.now(timezone.utc).isoformat(),
                 "reason": reason,
                 "channel_id": None,
                 "challenge": "",
@@ -3103,6 +3155,53 @@ class SukushiBot(discord.Client):
                 reason=str(record.get("reason") or "raison inconnue"),
                 variant=str(record.get("variant") or choose_prison_variant()),
             )
+
+    async def process_prison_taxes(self) -> None:
+        now = datetime.now(timezone.utc)
+        for user_id, record in get_all_prison_records():
+            raw_last_tax_at = record.get("last_tax_at")
+            raw_jailed_at = record.get("jailed_at")
+            anchor_raw = raw_last_tax_at if isinstance(raw_last_tax_at, str) else raw_jailed_at
+            if not isinstance(anchor_raw, str):
+                record["last_tax_at"] = now.isoformat()
+                set_prison_record(user_id, record)
+                continue
+
+            try:
+                last_tax_at = datetime.fromisoformat(anchor_raw)
+            except ValueError:
+                record["last_tax_at"] = now.isoformat()
+                set_prison_record(user_id, record)
+                continue
+
+            elapsed = now - last_tax_at
+            intervals = int(elapsed.total_seconds() // JAIL_PERIODIC_LOSS_INTERVAL.total_seconds())
+            if intervals <= 0:
+                continue
+
+            current_balance = ensure_minimum_balance(user_id)
+            total_lost = 0
+            for _ in range(intervals):
+                penalty_amount = compute_percentage_penalty(current_balance, JAIL_PERIODIC_LOSS_PERCENT)
+                if penalty_amount <= 0:
+                    break
+                current_balance = max(0, current_balance - penalty_amount)
+                total_lost += penalty_amount
+
+            if total_lost > 0:
+                set_balance_value(user_id, current_balance)
+                record_economy_stat("prison_tax", -total_lost)
+
+            record["last_tax_at"] = (last_tax_at + (JAIL_PERIODIC_LOSS_INTERVAL * intervals)).isoformat()
+            set_prison_record(user_id, record)
+
+    async def run_prison_tax_loop(self) -> None:
+        while not self.is_closed():
+            try:
+                await self.process_prison_taxes()
+            except Exception as exc:
+                print(f"Prison tax loop error: {exc}", flush=True)
+            await asyncio.sleep(60)
 
     async def get_event_channel(self) -> discord.TextChannel | None:
         channel = self.get_channel(EVENT_CHANNEL_ID)
@@ -4043,6 +4142,7 @@ async def run_attack_action(interaction: discord.Interaction, cible: discord.Mem
     update_cooldown(ATTACK_FILE, attacker.id)
     ACTIVE_ATTACK_USERS.add(attacker.id)
     ACTIVE_ATTACK_USERS.add(cible.id)
+    ACTIVE_ATTACK_COMMAND_USERS.add(attacker.id)
     view = AttackView(attacker, cible)
     await interaction.response.send_message(content=cible.mention, embed=view.build_embed(), view=view)
     view.message = await interaction.original_response()
@@ -4349,6 +4449,8 @@ async def run_mines_action(interaction: discord.Interaction, mise: int, bombes: 
 
 
 async def ensure_panel_access(interaction: discord.Interaction) -> bool:
+    if not await ensure_not_attacking(interaction):
+        return False
     if not await ensure_not_in_prison(interaction):
         return False
     if not await ensure_not_ecobanned(interaction):
