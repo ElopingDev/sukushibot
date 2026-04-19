@@ -702,9 +702,27 @@ def clear_faction_invite(user_id: int) -> None:
         save_faction_state(state)
 
 
-def reset_cooldown_files() -> None:
-    for path in (DAILY_FILE, WORK_FILE, CHANGEJOB_FILE, ATTACK_FILE):
+def reset_cooldown_files(*, max_energy: int) -> None:
+    for path in (DAILY_FILE, WORK_FILE):
         save_json_dict(path, {})
+
+    attack_data = load_json_dict(ATTACK_FILE)
+    preserved_attack_data = {
+        key: value
+        for key, value in attack_data.items()
+        if isinstance(key, str) and ":" in key
+    }
+    save_json_dict(ATTACK_FILE, preserved_attack_data)
+
+    combat_state = load_combat_state()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    updated_state: dict[str, dict[str, object]] = {}
+    for user_id, raw_profile in combat_state.items():
+        profile = _normalize_combat_profile(raw_profile, max_energy=max_energy)
+        profile["energy"] = max_energy
+        profile["last_refill_at"] = now_iso
+        updated_state[str(user_id)] = profile
+    save_combat_state(updated_state)
 
 
 def get_cooldown_remaining(path: Path, user_id: int, cooldown: timedelta) -> timedelta | None:

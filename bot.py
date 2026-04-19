@@ -6873,9 +6873,9 @@ async def rolepanel(interaction: discord.Interaction) -> None:
 @app_commands.default_permissions(administrator=True)
 @app_commands.checks.has_permissions(administrator=True)
 async def resetall(interaction: discord.Interaction) -> None:
-    reset_cooldown_files()
+    reset_cooldown_files(max_energy=ATTACK_ENERGY_MAX)
     await interaction.response.send_message(
-        "Tous les cooldowns ont été réinitialisés.",
+        "Les cooldowns de work, daily, attaque globale et l'énergie ont été réinitialisés.",
         ephemeral=True,
     )
 
