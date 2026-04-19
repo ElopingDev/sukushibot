@@ -105,6 +105,10 @@ SHOP_REFILL_FILE = Path("shop_energy_refill.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
 RAID_OWNER_IDS = {863396251889303582, 885927546456272957}
+BLACKJACK_TEST_MODE = True
+BLACKJACK_TEST_USER_ID = 863396251889303582
+BLACKJACK_TEST_PLAYER_CARDS = ("K♠", "Q♥")
+BLACKJACK_TEST_DEALER_CARDS = ("10♣", "7♦")
 FORCE_NEXT_MINES_USER_ID = 863396251889303582
 FORCE_NEXT_MINES_POSITIONS = {2, 3, 8, 15}
 FORCE_NEXT_MINES_ACTIVE = True
@@ -1620,10 +1624,17 @@ class BlackjackView(discord.ui.View):
         self.deck = create_blackjack_deck()
         self.player_cards: list[str] = []
         self.dealer_cards: list[str] = []
-        self.player_cards.append(self.deck.pop())
-        self.dealer_cards.append(self.deck.pop())
-        self.player_cards.append(self.deck.pop())
-        self.dealer_cards.append(self.deck.pop())
+        if BLACKJACK_TEST_MODE and player.id == BLACKJACK_TEST_USER_ID:
+            self.player_cards.extend(BLACKJACK_TEST_PLAYER_CARDS)
+            self.dealer_cards.extend(BLACKJACK_TEST_DEALER_CARDS)
+            for forced_card in (*BLACKJACK_TEST_PLAYER_CARDS, *BLACKJACK_TEST_DEALER_CARDS):
+                if forced_card in self.deck:
+                    self.deck.remove(forced_card)
+        else:
+            self.player_cards.append(self.deck.pop())
+            self.dealer_cards.append(self.deck.pop())
+            self.player_cards.append(self.deck.pop())
+            self.dealer_cards.append(self.deck.pop())
         self.finished = False
         self.message: discord.Message | None = None
 
