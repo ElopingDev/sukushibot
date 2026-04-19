@@ -72,14 +72,14 @@ from moderation import (
 )
 from levels import apply_message_xp, get_level_profile, get_top_levels, xp_needed_for_next_level
 
-WELCOME_CHANNEL_ID = 1494255574949429438
-GOODBYE_CHANNEL_ID = 1494255913366978641
-AUTOROLE_CHANNEL_ID = 1494255821054414878
-LEVELUP_CHANNEL_ID = 1494255415259693127
-LOTTERY_CHANNEL_ID = 1494473046499786802
-EVENT_CHANNEL_ID = 1494245154939469879
-LOTTERY_PING_ROLE_ID = 1494474779355386027
-TICKET_PANEL_CHANNEL_ID = 1494461780322287667
+WELCOME_CHANNEL_ID = 1495514749289500874
+GOODBYE_CHANNEL_ID = 1495514753718812722
+AUTOROLE_CHANNEL_ID = 1495514758873616486
+LEVELUP_CHANNEL_ID = 1495514776133177468
+LOTTERY_CHANNEL_ID = 1495514765232177202
+EVENT_CHANNEL_ID = 1495514766658109700
+LOTTERY_PING_ROLE_ID = 1495514726304714773
+TICKET_PANEL_CHANNEL_ID = 1495514761075490877
 JOIN_ROLE_ID = 1494249084221919343
 TICKET_STAFF_ROLE_ID = 1494265033784430632
 PRIMARY_GUILD_ID = 1494245152858964070
@@ -389,6 +389,25 @@ async def ensure_not_attacking(interaction: discord.Interaction) -> bool:
     else:
         await interaction.response.send_message(message_text, ephemeral=True)
     return False
+
+
+async def ensure_owner_staff_only(interaction: discord.Interaction) -> bool:
+    if interaction.user.id == BALANCE_RESET_OWNER_ID:
+        return True
+
+    message_text = "Tu n'es pas autorisé à utiliser cette commande."
+    if interaction.response.is_done():
+        await interaction.followup.send(message_text, ephemeral=True)
+    else:
+        await interaction.response.send_message(message_text, ephemeral=True)
+    return False
+
+
+def owner_staff_only():
+    async def predicate(interaction: discord.Interaction) -> bool:
+        return await ensure_owner_staff_only(interaction)
+
+    return app_commands.check(predicate)
 
 
 async def ensure_not_ecobanned(interaction: discord.Interaction) -> bool:
@@ -6837,6 +6856,7 @@ async def economystats(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="lotterypanel", description="Envoie le panneau de la loterie.")
 @prison_block(allow_staff_bypass=True)
+@owner_staff_only()
 @app_commands.default_permissions(manage_messages=True)
 @app_commands.checks.has_permissions(manage_messages=True)
 async def lotterypanel(interaction: discord.Interaction) -> None:
@@ -6879,6 +6899,7 @@ async def lotterypanel(interaction: discord.Interaction) -> None:
 
 @bot.tree.command(name="rolepanel", description="Envoie le panneau des autoroles.")
 @prison_block(allow_staff_bypass=True)
+@owner_staff_only()
 @app_commands.default_permissions(manage_messages=True)
 @app_commands.checks.has_permissions(manage_messages=True)
 async def rolepanel(interaction: discord.Interaction) -> None:
