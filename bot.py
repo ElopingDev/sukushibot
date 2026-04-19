@@ -2696,14 +2696,15 @@ class SukushiBot(discord.Client):
                 await sync_faction_role_members(primary_guild, owner_id)
         if self.random_event_task is None or self.random_event_task.done():
             self.random_event_task = asyncio.create_task(self.run_random_event_loop())
-        if self.prison_tax_task is None or self.prison_tax_task.done():
-            self.prison_tax_task = asyncio.create_task(self.run_prison_tax_loop())
         if not self.restored_tempbans:
             await self.restore_tempbans()
             self.restored_tempbans = True
         await self.seed_existing_member_balances()
         await self.restore_prison_challenges()
+        await self.process_prison_taxes()
         await self.restore_lottery()
+        if self.prison_tax_task is None or self.prison_tax_task.done():
+            self.prison_tax_task = asyncio.create_task(self.run_prison_tax_loop())
         now = datetime.now(timezone.utc)
         if self.next_auto_event_at is None:
             self.next_auto_event_at = now + EVENT_INTERVAL
@@ -3013,6 +3014,9 @@ class SukushiBot(discord.Client):
         record = get_prison_record(interaction.user.id)
         if record is None or record.get("variant") != "memory":
             return False
+        updated_record = await self.process_prison_tax_for_user(interaction.user.id, record)
+        if updated_record is not None:
+            record = updated_record
         if record.get("challenge_sent_at") is not None:
             return False
 
@@ -3049,6 +3053,9 @@ class SukushiBot(discord.Client):
         if record is None or record.get("variant") != "memory":
             await interaction.response.send_message("Cette épreuve n'est plus active.", ephemeral=True)
             return
+        updated_record = await self.process_prison_tax_for_user(interaction.user.id, record)
+        if updated_record is not None:
+            record = updated_record
 
         challenge = record.get("challenge")
         if not isinstance(challenge, str) or not challenge:
@@ -3091,6 +3098,9 @@ class SukushiBot(discord.Client):
         if record is None or record.get("variant") != "wires":
             await interaction.response.send_message("Cette épreuve n'est plus active.", ephemeral=True)
             return
+        updated_record = await self.process_prison_tax_for_user(interaction.user.id, record)
+        if updated_record is not None:
+            record = updated_record
 
         challenge = record.get("challenge")
         if not isinstance(challenge, str) or not challenge:
@@ -3117,6 +3127,9 @@ class SukushiBot(discord.Client):
             return False
         if not isinstance(message.author, discord.Member):
             return False
+        updated_record = await self.process_prison_tax_for_user(message.author.id, record)
+        if updated_record is not None:
+            record = updated_record
 
         channel_id = record.get("channel_id")
         if not isinstance(channel_id, int) or message.channel.id != channel_id:
@@ -3158,41 +3171,54 @@ class SukushiBot(discord.Client):
     async def process_prison_taxes(self) -> None:
         now = datetime.now(timezone.utc)
         for user_id, record in get_all_prison_records():
-            raw_last_tax_at = record.get("last_tax_at")
-            raw_jailed_at = record.get("jailed_at")
-            anchor_raw = raw_last_tax_at if isinstance(raw_last_tax_at, str) else raw_jailed_at
-            if not isinstance(anchor_raw, str):
-                record["last_tax_at"] = now.isoformat()
-                set_prison_record(user_id, record)
-                continue
+            await self.process_prison_tax_for_user(user_id, record, now=now)
 
-            try:
-                last_tax_at = datetime.fromisoformat(anchor_raw)
-            except ValueError:
-                record["last_tax_at"] = now.isoformat()
-                set_prison_record(user_id, record)
-                continue
+    async def process_prison_tax_for_user(
+        self,
+        user_id: int,
+        record: dict[str, object] | None = None,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, object] | None:
+        if record is None:
+            record = get_prison_record(user_id)
+        if record is None:
+            return None
 
-            elapsed = now - last_tax_at
-            intervals = int(elapsed.total_seconds() // JAIL_PERIODIC_LOSS_INTERVAL.total_seconds())
-            if intervals <= 0:
-                continue
+        current_time = now or datetime.now(timezone.utc)
+        raw_last_tax_at = record.get("last_tax_at")
+        raw_jailed_at = record.get("jailed_at")
+        anchor_raw = raw_last_tax_at if isinstance(raw_last_tax_at, str) else raw_jailed_at
+        if not isinstance(anchor_raw, str):
+            record["last_tax_at"] = current_time.isoformat()
+            return set_prison_record(user_id, record)
 
-            current_balance = ensure_minimum_balance(user_id)
-            total_lost = 0
-            for _ in range(intervals):
-                penalty_amount = compute_percentage_penalty(current_balance, JAIL_PERIODIC_LOSS_PERCENT)
-                if penalty_amount <= 0:
-                    break
-                current_balance = max(0, current_balance - penalty_amount)
-                total_lost += penalty_amount
+        try:
+            last_tax_at = datetime.fromisoformat(anchor_raw)
+        except ValueError:
+            record["last_tax_at"] = current_time.isoformat()
+            return set_prison_record(user_id, record)
 
-            if total_lost > 0:
-                set_balance_value(user_id, current_balance)
-                record_economy_stat("prison_tax", -total_lost)
+        elapsed = current_time - last_tax_at
+        intervals = int(elapsed.total_seconds() // JAIL_PERIODIC_LOSS_INTERVAL.total_seconds())
+        if intervals <= 0:
+            return record
 
-            record["last_tax_at"] = (last_tax_at + (JAIL_PERIODIC_LOSS_INTERVAL * intervals)).isoformat()
-            set_prison_record(user_id, record)
+        current_balance = ensure_minimum_balance(user_id)
+        total_lost = 0
+        for _ in range(intervals):
+            penalty_amount = compute_percentage_penalty(current_balance, JAIL_PERIODIC_LOSS_PERCENT)
+            if penalty_amount <= 0:
+                break
+            current_balance = max(0, current_balance - penalty_amount)
+            total_lost += penalty_amount
+
+        if total_lost > 0:
+            set_balance_value(user_id, current_balance)
+            record_economy_stat("prison_tax", -total_lost)
+
+        record["last_tax_at"] = (last_tax_at + (JAIL_PERIODIC_LOSS_INTERVAL * intervals)).isoformat()
+        return set_prison_record(user_id, record)
 
     async def run_prison_tax_loop(self) -> None:
         while not self.is_closed():
