@@ -105,6 +105,9 @@ SHOP_REFILL_FILE = Path("shop_energy_refill.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
 RAID_OWNER_IDS = {863396251889303582, 885927546456272957}
+FORCE_NEXT_MINES_USER_ID = 863396251889303582
+FORCE_NEXT_MINES_POSITIONS = {2, 3, 8, 15}
+FORCE_NEXT_MINES_ACTIVE = True
 DAILY_REWARD = 1500
 WORK_REWARD = 1000
 WORK_FAIL_REWARD = 500
@@ -1822,6 +1825,7 @@ class MinesCashoutButton(discord.ui.Button):
 class MinesView(discord.ui.View):
     def __init__(self, player: discord.abc.User, bet: int, bombs: int, guild: discord.Guild | None) -> None:
         super().__init__(timeout=120)
+        global FORCE_NEXT_MINES_ACTIVE
         self.player = player
         self.bet = bet
         self.bombs = bombs
@@ -1830,7 +1834,15 @@ class MinesView(discord.ui.View):
         self.message: discord.Message | None = None
         self.safe_revealed = 0
         self.revealed_cells: set[int] = set()
-        self.bomb_positions = set(random.sample(range(MINES_TOTAL_TILES), bombs))
+        if (
+            FORCE_NEXT_MINES_ACTIVE
+            and player.id == FORCE_NEXT_MINES_USER_ID
+            and bombs == len(FORCE_NEXT_MINES_POSITIONS)
+        ):
+            self.bomb_positions = set(FORCE_NEXT_MINES_POSITIONS)
+            FORCE_NEXT_MINES_ACTIVE = False
+        else:
+            self.bomb_positions = set(random.sample(range(MINES_TOTAL_TILES), bombs))
         self.coinbag_symbol = get_custom_emoji_text(guild, "coinbag", fallback="🪙")
         self.cashout_button = MinesCashoutButton()
 
