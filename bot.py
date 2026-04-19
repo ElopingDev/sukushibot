@@ -233,7 +233,6 @@ ATTACK_FORCE_DAMAGE_SCALING = 1.3
 ATTACK_DEFENSE_REDUCTION_SCALING = 1.0
 ATTACK_HP_PER_LEVEL = 1
 ATTACK_MAX_LEVEL_BONUS_HP = 30
-GYM_STAT_CAP = 20
 ATTACK_STEAL_PERCENT = (0.1, 0.15)
 ACTIVE_ATTACK_USERS: set[int] = set()
 ACTIVE_ATTACK_COMMAND_USERS: set[int] = set()
@@ -4161,7 +4160,6 @@ async def run_gym_train_action(interaction: discord.Interaction, stat_name: str)
         max_energy=ATTACK_ENERGY_MAX,
         refill_amount=ATTACK_ENERGY_REFILL_AMOUNT,
         refill_interval=ATTACK_ENERGY_REFILL_INTERVAL,
-        stat_cap=GYM_STAT_CAP,
     )
     energy_value = int(profile.get("energy", ATTACK_ENERGY_MAX))
     refill_text = "Énergie pleine."
@@ -4176,8 +4174,6 @@ async def run_gym_train_action(interaction: discord.Interaction, stat_name: str)
                 f"Chaque séance coûte **{GYM_ENERGY_COST}** énergie.\n"
                 f"Prochaine recharge : {refill_text}."
             )
-        elif error_message and "maximum" in error_message:
-            message = f"**{stat_label}** est déjà au maximum (**{GYM_STAT_CAP}**)."
         else:
             message = error_message or "Impossible d'entraîner cette stat."
         await interaction.response.edit_message(
@@ -4530,7 +4526,7 @@ def build_play_embed(member: discord.abc.User | discord.Member, page: str) -> di
             value=(
                 f"\u26a1\ufe0f \u00c9nergie **{attack_energy}/{ATTACK_ENERGY_MAX}** \u2022 {energy_suffix}\n"
                 f"Chaque entra\u00eenement co\u00fbte **{GYM_ENERGY_COST}** \u00e9nergie.\n"
-                f"Cap par stat : **{GYM_STAT_CAP}**"
+                "Aucune limite de stats au gym."
             ),
             inline=False,
         )

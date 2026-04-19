@@ -349,7 +349,7 @@ def train_combat_stat(
     max_energy: int,
     refill_amount: int,
     refill_interval: timedelta,
-    stat_cap: int,
+    stat_cap: int | None = None,
 ) -> tuple[bool, dict[str, object], timedelta | None, str | None]:
     if stat_name not in {"force", "defense", "speed"}:
         profile, next_refill_in = _get_refilled_combat_profile(
@@ -371,7 +371,7 @@ def train_combat_stat(
     current_energy = int(profile.get("energy", max_energy))
     current_stat = int(profile.get(stat_name, 0))
 
-    if current_stat >= stat_cap:
+    if stat_cap is not None and current_stat >= stat_cap:
         return False, profile, next_refill_in, f"{stat_name} est déjà au maximum."
     if current_energy < energy_cost:
         return False, profile, next_refill_in, "Pas assez d'énergie."
