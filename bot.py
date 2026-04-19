@@ -252,10 +252,10 @@ AUTOROLE_PANELS = [
         ),
         "include_banner": True,
         "entries": [
-            {"emoji": "♂️", "label": "Homme", "role_id": 1494250520112791582},
-            {"emoji": "♀️", "label": "Femme", "role_id": 1494250520662245446},
-            {"emoji": "🌈", "label": "Non binaire", "role_id": 1494250522495029369},
-            {"emoji": "❔", "label": "Autre", "role_id": 1494250524940173352},
+            {"emoji": "♂️", "label": "Homme", "role_id": 1495514713231196321},
+            {"emoji": "♀️", "label": "Femme", "role_id": 1495514714183041288},
+            {"emoji": "🌈", "label": "Non binaire", "role_id": 1495514716418867241},
+            {"emoji": "❔", "label": "Autre", "role_id": 1495514717723164812},
         ],
     },
     {
@@ -266,9 +266,9 @@ AUTOROLE_PANELS = [
         ),
         "include_banner": False,
         "entries": [
-            {"emoji": "1️⃣", "label": "13-15 ans", "role_id": 1494249086126264401},
-            {"emoji": "2️⃣", "label": "16-17 ans", "role_id": 1494249086931439698},
-            {"emoji": "3️⃣", "label": "18 ans +", "role_id": 1494250520112533544},
+            {"emoji": "1️⃣", "label": "13-15 ans", "role_id": 1495514708642369769},
+            {"emoji": "2️⃣", "label": "16-17 ans", "role_id": 1495514709720305745},
+            {"emoji": "3️⃣", "label": "18 ans +", "role_id": 1495514711301689406},
         ],
     },
     {
@@ -279,10 +279,10 @@ AUTOROLE_PANELS = [
         ),
         "include_banner": False,
         "entries": [
-            {"emoji": "📢", "label": "Annonces", "role_id": 1494250525846278174},
-            {"emoji": "🎁", "label": "Giveaway", "role_id": 1494250837814284389},
-            {"emoji": "🎉", "label": "Events", "role_id": 1494250775734386781},
-            {"emoji": "💸", "label": "Économie", "role_id": 1494474779355386027},
+            {"emoji": "📢", "label": "Annonces", "role_id": 1495514718679334923},
+            {"emoji": "🎁", "label": "Giveaway", "role_id": 1495514720348930098},
+            {"emoji": "🎉", "label": "Events", "role_id": 1495514721938440233},
+            {"emoji": "💸", "label": "Économie", "role_id": 1495514726304714773},
         ],
     },
 ]
