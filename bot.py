@@ -1402,11 +1402,20 @@ class AttackView(discord.ui.View):
         self.message: discord.Message | None = None
         self.log: list[str] = ["Le duel commence."]
 
-    def build_combatant_value(self, member: discord.Member, hp: int, stats: dict[str, int], *, ai_controlled: bool) -> str:
-        role_text = "IA d\u00e9fensive" if ai_controlled else "Joueur"
+    def build_combatant_value(
+        self,
+        member: discord.Member,
+        hp: int,
+        max_hp: int,
+        stats: dict[str, int],
+        *,
+        ai_controlled: bool,
+    ) -> str:
+        role_text = "IA d?fensive" if ai_controlled else "Joueur"
         return (
-            f"{make_hp_bar(hp)}\n"
-            f"Niveau **{stats['level']}** \u2022 {role_text}\n"
+            f"{make_hp_bar(hp, max_hp)}\n"
+            f"Niveau **{stats['level']}** ? {role_text}\n"
+            f"\u2764\ufe0f PV max **{max_hp}**\n"
             f"{format_attack_stats(stats)}"
         )
 
@@ -1424,12 +1433,24 @@ class AttackView(discord.ui.View):
         )
         embed.add_field(
             name=f"\U0001f7e5 {self.attacker.display_name}",
-            value=self.build_combatant_value(self.attacker, self.attacker_hp, self.attacker_stats, ai_controlled=False),
+            value=self.build_combatant_value(
+                self.attacker,
+                self.attacker_hp,
+                self.attacker_max_hp,
+                self.attacker_stats,
+                ai_controlled=False,
+            ),
             inline=True,
         )
         embed.add_field(
             name=f"\U0001f7e6 {self.target.display_name}",
-            value=self.build_combatant_value(self.target, self.target_hp, self.target_stats, ai_controlled=True),
+            value=self.build_combatant_value(
+                self.target,
+                self.target_hp,
+                self.target_max_hp,
+                self.target_stats,
+                ai_controlled=True,
+            ),
             inline=True,
         )
         embed.add_field(
@@ -4056,7 +4077,7 @@ async def run_gym_train_action(interaction: discord.Interaction, stat_name: str)
                 f"Prochaine recharge : {refill_text}."
             )
         elif error_message and "maximum" in error_message:
-            message = f"**{stat_label}** est d?j? au maximum (**{GYM_STAT_CAP}**)."
+            message = f"**{stat_label}** est déjà au maximum (**{GYM_STAT_CAP}**)."
         else:
             message = error_message or "Impossible d'entraîner cette stat."
         await interaction.response.edit_message(
@@ -4073,7 +4094,7 @@ async def run_gym_train_action(interaction: discord.Interaction, stat_name: str)
     )
     await interaction.followup.send(
         (
-            f"Entra?nement r?ussi : **{stat_label}** passe ? **{new_value}**.\n"
+            f"Entraînement réussi : **{stat_label}** passe à **{new_value}**.\n"
             f"Énergie restante : **{energy_value}/{ATTACK_ENERGY_MAX}**.\n"
             f"Prochaine recharge : {refill_text}."
         ),
