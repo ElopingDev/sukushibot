@@ -1430,10 +1430,10 @@ class AttackView(discord.ui.View):
         *,
         ai_controlled: bool,
     ) -> str:
-        role_text = "IA d?fensive" if ai_controlled else "Joueur"
+        role_text = "IA défensive" if ai_controlled else "Joueur"
         return (
             f"{make_hp_bar(hp, max_hp)}\n"
-            f"Niveau **{stats['level']}** ? {role_text}\n"
+            f"Niveau **{stats['level']}** • {role_text}\n"
             f"\u2764\ufe0f PV max **{max_hp}**\n"
             f"{format_attack_stats(stats)}"
         )
