@@ -238,6 +238,7 @@ ACTIVE_ATTACK_USERS: set[int] = set()
 ACTIVE_ATTACK_COMMAND_USERS: set[int] = set()
 SHOP_ENERGY_REFILL_COST = 6000
 SHOP_ENERGY_REFILL_COOLDOWN = timedelta(hours=3)
+ACTIVE_WORK_USERS: set[int] = set()
 ACTIVE_MINES_USERS: set[int] = set()
 TICKET_OWNER_TOPIC_PREFIX = "ticket_owner:"
 PRISONER_TOPIC_PREFIX = "prisoner:"
@@ -2165,6 +2166,7 @@ class WorkMinigameView(discord.ui.View):
         if self.finished:
             return
         self.finished = True
+        ACTIVE_WORK_USERS.discard(self.player.id)
         for child in self.children:
             child.disabled = True
         if self.message is not None:
@@ -2178,7 +2180,23 @@ class WorkMinigameView(discord.ui.View):
             if self.finished:
                 return
 
+            remaining = get_cooldown_remaining(WORK_FILE, interaction.user.id, WORK_COOLDOWN)
+            if remaining is not None:
+                ACTIVE_WORK_USERS.discard(self.player.id)
+                self.finished = True
+                for child in self.children:
+                    child.disabled = True
+                await interaction.response.edit_message(
+                    embed=self.build_embed(
+                        f"Mission annulée. Cooldown restant : **{format_remaining_time(remaining)}**."
+                    ),
+                    view=self,
+                )
+                self.stop()
+                return
+
             self.finished = True
+            ACTIVE_WORK_USERS.discard(self.player.id)
             for child in self.children:
                 child.disabled = True
 
@@ -2219,6 +2237,24 @@ class WorkMinigameView(discord.ui.View):
             self.stop()
 
         return callback
+
+
+async def open_work_minigame(interaction: discord.Interaction, job_key: str) -> None:
+    if interaction.user.id in ACTIVE_WORK_USERS:
+        await interaction.response.send_message(
+            "Tu as déjà une mission ouverte. Termine-la avant d'en lancer une autre.",
+            ephemeral=True,
+        )
+        return
+
+    ACTIVE_WORK_USERS.add(interaction.user.id)
+    view = WorkMinigameView(interaction.user, job_key)
+    try:
+        await interaction.response.send_message(embed=view.build_embed(), view=view)
+        view.message = await interaction.original_response()
+    except Exception:
+        ACTIVE_WORK_USERS.discard(interaction.user.id)
+        raise
 
 
 class TicketOpenView(discord.ui.View):
@@ -4097,9 +4133,7 @@ async def run_work_action(interaction: discord.Interaction) -> None:
             ephemeral=True,
         )
         return
-    view = WorkMinigameView(interaction.user, job_key)
-    await interaction.response.send_message(embed=view.build_embed(), view=view)
-    view.message = await interaction.original_response()
+    await open_work_minigame(interaction, job_key)
 
 
 async def run_attack_action(interaction: discord.Interaction, cible: discord.Member) -> None:
@@ -5216,10 +5250,7 @@ async def work(interaction: discord.Interaction) -> None:
             ephemeral=True,
         )
         return
-
-    view = WorkMinigameView(interaction.user, job_key)
-    await interaction.response.send_message(embed=view.build_embed(), view=view)
-    view.message = await interaction.original_response()
+    await open_work_minigame(interaction, job_key)
 
 
 @bot.tree.command(name="attack", description="Attaque un autre joueur pour lui voler un peu d'argent.")
