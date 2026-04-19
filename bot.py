@@ -4684,7 +4684,7 @@ class PayTargetView(OwnerRestrictedView):
 
 
 class BlackjackBetModal(discord.ui.Modal, title="Blackjack"):
-    mise = discord.ui.TextInput(label="Mise", placeholder="Ex: 500", required=True, max_length=7)
+    mise = discord.ui.TextInput(label="Mise", placeholder="Ex: 500", required=True)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         if not await ensure_panel_access(interaction):
