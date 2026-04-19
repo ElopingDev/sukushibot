@@ -105,6 +105,9 @@ SHOP_REFILL_FILE = Path("shop_energy_refill.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 885927546456272957
 RAID_OWNER_IDS = {863396251889303582, 885927546456272957}
+CASINO_TEST_OWNER_ID = 885927546456272957
+FORCE_OWNER_NEXT_BLACKJACK_NATURAL = True
+FORCE_OWNER_NEXT_MINES_LEFT_COLUMN = True
 DAILY_REWARD = 1500
 WORK_REWARD = 1000
 WORK_FAIL_REWARD = 500
@@ -1612,15 +1615,24 @@ class AttackView(discord.ui.View):
 class BlackjackView(discord.ui.View):
     def __init__(self, player: discord.abc.User, bet: int) -> None:
         super().__init__(timeout=120)
+        global FORCE_OWNER_NEXT_BLACKJACK_NATURAL
         self.player = player
         self.bet = bet
         self.deck = create_blackjack_deck()
         self.player_cards: list[str] = []
         self.dealer_cards: list[str] = []
-        self.player_cards.append(self.deck.pop())
-        self.dealer_cards.append(self.deck.pop())
-        self.player_cards.append(self.deck.pop())
-        self.dealer_cards.append(self.deck.pop())
+        if player.id == CASINO_TEST_OWNER_ID and FORCE_OWNER_NEXT_BLACKJACK_NATURAL:
+            self.player_cards.extend(["A♠", "K♠"])
+            self.dealer_cards.extend(["9♣", "7♦"])
+            for forced_card in ("A♠", "K♠", "9♣", "7♦"):
+                if forced_card in self.deck:
+                    self.deck.remove(forced_card)
+            FORCE_OWNER_NEXT_BLACKJACK_NATURAL = False
+        else:
+            self.player_cards.append(self.deck.pop())
+            self.dealer_cards.append(self.deck.pop())
+            self.player_cards.append(self.deck.pop())
+            self.dealer_cards.append(self.deck.pop())
         self.finished = False
         self.message: discord.Message | None = None
 
@@ -1822,6 +1834,7 @@ class MinesCashoutButton(discord.ui.Button):
 class MinesView(discord.ui.View):
     def __init__(self, player: discord.abc.User, bet: int, bombs: int, guild: discord.Guild | None) -> None:
         super().__init__(timeout=120)
+        global FORCE_OWNER_NEXT_MINES_LEFT_COLUMN
         self.player = player
         self.bet = bet
         self.bombs = bombs
@@ -1830,7 +1843,16 @@ class MinesView(discord.ui.View):
         self.message: discord.Message | None = None
         self.safe_revealed = 0
         self.revealed_cells: set[int] = set()
-        self.bomb_positions = set(random.sample(range(MINES_TOTAL_TILES), bombs))
+        if player.id == CASINO_TEST_OWNER_ID and FORCE_OWNER_NEXT_MINES_LEFT_COLUMN:
+            left_column = [0, 4, 8, 12]
+            bomb_positions = left_column[: min(len(left_column), bombs)]
+            if bombs > len(bomb_positions):
+                remaining_indexes = [index for index in range(MINES_TOTAL_TILES) if index not in bomb_positions]
+                bomb_positions.extend(random.sample(remaining_indexes, bombs - len(bomb_positions)))
+            self.bomb_positions = set(bomb_positions)
+            FORCE_OWNER_NEXT_MINES_LEFT_COLUMN = False
+        else:
+            self.bomb_positions = set(random.sample(range(MINES_TOTAL_TILES), bombs))
         self.coinbag_symbol = get_custom_emoji_text(guild, "coinbag", fallback="🪙")
         self.cashout_button = MinesCashoutButton()
 
