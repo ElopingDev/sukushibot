@@ -81,6 +81,7 @@ EVENT_CHANNEL_ID = 1495514766658109700
 LOTTERY_PING_ROLE_ID = 1495514726304714773
 TICKET_PANEL_CHANNEL_ID = 1495514761075490877
 JOIN_ROLE_ID = 1494249084221919343
+NEW_MEMBER_ROLE_ID = 1495514707220758639
 TICKET_STAFF_ROLE_ID = 1494265033784430632
 PRIMARY_GUILD_ID = 1494245152858964070
 
@@ -3762,12 +3763,18 @@ class SukushiBot(discord.Client):
 
     async def on_member_join(self, member: discord.Member) -> None:
         ensure_minimum_balance(member.id)
-        join_role = get_role_by_id(member.guild, JOIN_ROLE_ID)
-        if join_role is not None:
+        auto_roles = [
+            (JOIN_ROLE_ID, "Automatic join role"),
+            (NEW_MEMBER_ROLE_ID, "Automatic new member role"),
+        ]
+        for role_id, reason in auto_roles:
+            role = get_role_by_id(member.guild, role_id)
+            if role is None:
+                continue
             try:
-                await member.add_roles(join_role, reason="Automatic join role")
+                await member.add_roles(role, reason=reason)
             except discord.Forbidden:
-                print(f"Could not assign join role {JOIN_ROLE_ID} to {member}.")
+                print(f"Could not assign role {role_id} to {member}.")
 
         channel = self.get_channel(WELCOME_CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
