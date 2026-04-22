@@ -4087,7 +4087,7 @@ async def run_daily_action(interaction: discord.Interaction) -> None:
     remaining = get_cooldown_remaining(DAILY_FILE, interaction.user.id, DAILY_COOLDOWN)
     if remaining is not None:
         await interaction.response.send_message(
-            f"Ton `/daily` est en cooldown pendant encore **{format_remaining_time(remaining)}**.",
+            f"Ton daily est en cooldown pendant encore **{format_remaining_time(remaining)}**. Passe par `/play` pour le relancer plus tard.",
             ephemeral=True,
         )
         return
@@ -4128,7 +4128,7 @@ async def run_changejob_action(interaction: discord.Interaction) -> None:
     ensure_minimum_balance(interaction.user.id)
     current_job = get_job(interaction.user.id)
     if current_job is None:
-        await interaction.response.send_message("Tu n'as pas encore de métier. Utilise `/getjob` d'abord.", ephemeral=True)
+        await interaction.response.send_message("Tu n'as pas encore de métier. Ouvre `/play` puis va dans **Crime** pour en choisir un.", ephemeral=True)
         return
     remaining = get_cooldown_remaining(CHANGEJOB_FILE, interaction.user.id, CHANGEJOB_COOLDOWN)
     if remaining is not None:
@@ -4154,7 +4154,7 @@ async def run_work_action(interaction: discord.Interaction) -> None:
     ensure_minimum_balance(interaction.user.id)
     job_key = get_job(interaction.user.id)
     if job_key is None:
-        await interaction.response.send_message("Tu n'as pas encore de métier. Utilise `/getjob` d'abord.", ephemeral=True)
+        await interaction.response.send_message("Tu n'as pas encore de métier. Ouvre `/play` puis va dans **Crime** pour en choisir un.", ephemeral=True)
         return
     remaining = get_cooldown_remaining(WORK_FILE, interaction.user.id, WORK_COOLDOWN)
     if remaining is not None:
@@ -5181,7 +5181,7 @@ async def daily(interaction: discord.Interaction) -> None:
     remaining = get_cooldown_remaining(DAILY_FILE, interaction.user.id, DAILY_COOLDOWN)
     if remaining is not None:
         await interaction.response.send_message(
-            f"Ton `/daily` est en cooldown pendant encore **{format_remaining_time(remaining)}**.",
+            f"Ton daily est en cooldown pendant encore **{format_remaining_time(remaining)}**. Passe par `/play` pour le relancer plus tard.",
             ephemeral=True,
         )
         return
@@ -5234,7 +5234,7 @@ async def changejob(interaction: discord.Interaction) -> None:
     current_job = get_job(interaction.user.id)
     if current_job is None:
         await interaction.response.send_message(
-            "Tu n'as pas encore de métier. Utilise `/getjob` d'abord.",
+            "Tu n'as pas encore de métier. Ouvre `/play` puis va dans **Crime** pour en choisir un.",
             ephemeral=True,
         )
         return
@@ -5268,7 +5268,7 @@ async def work(interaction: discord.Interaction) -> None:
     job_key = get_job(interaction.user.id)
     if job_key is None:
         await interaction.response.send_message(
-            "Tu n'as pas encore de métier. Utilise `/getjob` d'abord.",
+            "Tu n'as pas encore de métier. Ouvre `/play` puis va dans **Crime** pour en choisir un.",
             ephemeral=True,
         )
         return
@@ -5411,7 +5411,7 @@ async def createfaction(
         (
             f"Ta faction **{faction_name}** a été créée pour **{FACTION_CREATE_COST} Sukushi Dollars**.\n"
             f"Nouveau solde : **{new_balance} Sukushi Dollars**.\n"
-            "Utilise `/setfactiontag` pour définir un tag, puis `/invitefaction` pour recruter."
+            "Passe par `/play` > **Faction | Gestion** pour définir un tag puis inviter des membres."
         ),
     )
 
@@ -5709,7 +5709,7 @@ async def invitefaction(
     await interaction.response.send_message(
         (
             f"{membre.mention}, **{interaction.user.display_name}** t'invite à rejoindre la faction **{faction.get('name') or 'ta faction'}**.\n"
-            "La personne doit utiliser `/joinfaction` pour accepter."
+            "La personne doit passer par `/play` > **Faction** puis choisir **Rejoindre** pour accepter."
         ),
     )
 
@@ -5803,7 +5803,7 @@ async def leavefaction(interaction: discord.Interaction) -> None:
     owner_id, faction = faction_info
     if owner_id == interaction.user.id:
         await interaction.response.send_message(
-            "Le chef ne peut pas quitter sa faction. Utilise `/disbandfaction` à la place.",
+            "Le chef ne peut pas quitter sa faction. Passe plutôt par `/play` > **Faction | Alliances** puis **Dissoudre**.",
         )
         return
 
@@ -5868,7 +5868,7 @@ async def kickfaction(
 
     if membre.id == interaction.user.id:
         await interaction.response.send_message(
-            "Utilise `/disbandfaction` si tu veux fermer ta faction.",
+            "Passe par `/play` > **Faction | Alliances** puis **Dissoudre** si tu veux fermer ta faction.",
         )
         return
 
@@ -6125,7 +6125,7 @@ async def faction(interaction: discord.Interaction) -> None:
             await interaction.response.send_message(
                 (
                     "Tu ne fais partie d'aucune faction.\n"
-                    f"Invitation en attente : **{pending_name}**. Utilise `/joinfaction` pour accepter."
+                    f"Invitation en attente : **{pending_name}**. Passe par `/play` > **Faction** puis **Rejoindre** pour accepter."
                 ),
             )
             return
@@ -6274,7 +6274,7 @@ async def ally(
         await interaction.response.send_message(
             (
                 f"Une demande d'alliance a déjà été envoyée à **{target_entry.get('name') or 'cette faction'}**.\n"
-                "Le chef adverse doit utiliser `/ally <ton tag>` pour accepter."
+                "Le chef adverse doit passer par `/play` > **Faction | Alliances** pour accepter."
             ),
         )
         return
@@ -6285,7 +6285,7 @@ async def ally(
     await interaction.response.send_message(
         (
             f"Demande d'alliance envoyée à **{target_entry.get('name') or 'cette faction'}**.\n"
-            f"Leur chef doit utiliser `/ally {own_entry.get('tag') or 'TAG'}` pour accepter."
+            "Leur chef doit passer par `/play` > **Faction | Alliances** pour accepter."
         ),
     )
 
