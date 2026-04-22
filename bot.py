@@ -1539,15 +1539,19 @@ class AttackView(discord.ui.View):
 
         for child in self.children:
             child.disabled = True
-        if self.message is not None:
-            await self.message.edit(
-                embed=self.build_embed(result),
-                view=self,
-            )
-        ACTIVE_ATTACK_USERS.discard(self.attacker.id)
-        ACTIVE_ATTACK_USERS.discard(self.target.id)
-        ACTIVE_ATTACK_COMMAND_USERS.discard(self.attacker.id)
-        self.stop()
+        try:
+            if self.message is not None:
+                await self.message.edit(
+                    embed=self.build_embed(result),
+                    view=self,
+                )
+        except (discord.NotFound, discord.HTTPException):
+            pass
+        finally:
+            ACTIVE_ATTACK_USERS.discard(self.attacker.id)
+            ACTIVE_ATTACK_USERS.discard(self.target.id)
+            ACTIVE_ATTACK_COMMAND_USERS.discard(self.attacker.id)
+            self.stop()
 
     async def finish_combat(self, interaction: discord.Interaction, *, attacker_won: bool) -> None:
         self.finished = True
