@@ -82,7 +82,7 @@ LOTTERY_PING_ROLE_ID = 1495514726304714773
 TICKET_PANEL_CHANNEL_ID = 1495514761075490877
 JOIN_ROLE_ID = 1494249084221919343
 NEW_MEMBER_ROLE_ID = 1495514707220758639
-TICKET_STAFF_ROLE_ID = 1494265033784430632
+TICKET_STAFF_ROLE_ID = 1495514701118046238
 PRIMARY_GUILD_ID = 1494245152858964070
 
 BANNER_URL = "https://i.imgur.com/x4uAHlu.png"
@@ -2305,7 +2305,13 @@ class TicketOpenView(discord.ui.View):
 
         staff_role = get_role_by_id(interaction.guild, TICKET_STAFF_ROLE_ID)
         panel_channel = interaction.guild.get_channel(TICKET_PANEL_CHANNEL_ID)
-        if staff_role is None or not isinstance(panel_channel, discord.TextChannel):
+        if panel_channel is None:
+            try:
+                fetched_channel = await interaction.guild.fetch_channel(TICKET_PANEL_CHANNEL_ID)
+            except discord.HTTPException:
+                fetched_channel = None
+            panel_channel = fetched_channel if isinstance(fetched_channel, discord.TextChannel) else None
+        if not isinstance(panel_channel, discord.TextChannel):
             await interaction.response.send_message(
                 "Le système de tickets n'est pas configuré correctement.",
                 ephemeral=True,
@@ -2337,13 +2343,6 @@ class TicketOpenView(discord.ui.View):
                 attach_files=True,
                 embed_links=True,
             ),
-            staff_role: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                manage_channels=True,
-                manage_messages=True,
-            ),
             bot_member: discord.PermissionOverwrite(
                 view_channel=True,
                 send_messages=True,
@@ -2352,6 +2351,14 @@ class TicketOpenView(discord.ui.View):
                 manage_messages=True,
             ),
         }
+        if staff_role is not None:
+            overwrites[staff_role] = discord.PermissionOverwrite(
+                view_channel=True,
+                send_messages=True,
+                read_message_history=True,
+                manage_channels=True,
+                manage_messages=True,
+            )
 
         channel_name = f"ticket-{sanitize_ticket_name(interaction.user.display_name)}"
         ticket_channel = await interaction.guild.create_text_channel(
@@ -2371,10 +2378,16 @@ class TicketOpenView(discord.ui.View):
             color=SUKUSHI_PINK,
             footer="Sukushi bot | Tickets",
         )
+        ticket_content = interaction.user.mention
+        allowed_mentions = discord.AllowedMentions(users=True, roles=False)
+        if staff_role is not None:
+            ticket_content = f"{interaction.user.mention} {staff_role.mention}"
+            allowed_mentions = discord.AllowedMentions(users=True, roles=[staff_role])
         await ticket_channel.send(
-            content=f"{interaction.user.mention} <@&{TICKET_STAFF_ROLE_ID}>",
+            content=ticket_content,
             embed=embed,
             view=TicketCloseView(),
+            allowed_mentions=allowed_mentions,
         )
         await interaction.response.send_message(
             f"Ton ticket a été créé : {ticket_channel.mention}.",
