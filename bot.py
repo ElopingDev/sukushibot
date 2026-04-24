@@ -246,6 +246,7 @@ ACTIVE_MINES_USERS: set[int] = set()
 TICKET_OWNER_TOPIC_PREFIX = "ticket_owner:"
 PRISONER_TOPIC_PREFIX = "prisoner:"
 ELO_REMIND_ROLE_ID = 1495514714183041288
+ELO_REMIND_CHANNEL_ID = 1496924993077116998
 ELO_REMIND_TARGET_USER_ID = 885927546456272957
 ELO_REMIND_MESSAGE = (
     "je te paye stv, tu portes mon enfant pendant 9 mois comme ça il a nos gènes parfaites, "
@@ -3875,10 +3876,10 @@ class SukushiBot(discord.Client):
         if not is_eloremind_enabled(after.guild.id):
             return
 
-        channel = after.guild.get_channel(AUTOROLE_CHANNEL_ID)
+        channel = after.guild.get_channel(ELO_REMIND_CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
             try:
-                fetched_channel = await after.guild.fetch_channel(AUTOROLE_CHANNEL_ID)
+                fetched_channel = await after.guild.fetch_channel(ELO_REMIND_CHANNEL_ID)
             except discord.HTTPException:
                 return
             channel = fetched_channel if isinstance(fetched_channel, discord.TextChannel) else None
