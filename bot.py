@@ -103,6 +103,7 @@ ECOBAN_FILE = Path("ecoban.json")
 SLOTS_COOLDOWN_FILE = Path("slots_cooldowns.json")
 RAID_STATE_FILE = Path("raid_state.json")
 SHOP_REFILL_FILE = Path("shop_energy_refill.json")
+ELO_REMIND_FILE = Path("eloremind.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 863396251889303582
 OWNER_STAFF_IDS = {863396251889303582, 885927546456272957}
@@ -244,6 +245,13 @@ ACTIVE_WORK_USERS: set[int] = set()
 ACTIVE_MINES_USERS: set[int] = set()
 TICKET_OWNER_TOPIC_PREFIX = "ticket_owner:"
 PRISONER_TOPIC_PREFIX = "prisoner:"
+ELO_REMIND_ROLE_ID = 1495514714183041288
+ELO_REMIND_TARGET_USER_ID = 885927546456272957
+ELO_REMIND_MESSAGE = (
+    "je te paye stv, tu portes mon enfant pendant 9 mois comme ça il a nos gènes parfaites, "
+    "ensuite je transforme l'enfant en machine académique et il/elle deviendra une personne puissante "
+    "après je te donne une part de ce qu'il gagne"
+)
 
 AUTOROLE_PANELS = [
     {
@@ -900,6 +908,21 @@ def save_raid_channel_ids(guild_id: int, channel_ids: set[int]) -> None:
     else:
         data.pop(key, None)
     save_json_dict(RAID_STATE_FILE, data)
+
+
+def is_eloremind_enabled(guild_id: int) -> bool:
+    data = load_json_dict(ELO_REMIND_FILE)
+    return data.get(str(guild_id), "0") == "1"
+
+
+def set_eloremind_enabled(guild_id: int, enabled: bool) -> None:
+    data = load_json_dict(ELO_REMIND_FILE)
+    key = str(guild_id)
+    if enabled:
+        data[key] = "1"
+    else:
+        data.pop(key, None)
+    save_json_dict(ELO_REMIND_FILE, data)
 
 
 def member_has_role(member: discord.abc.User | discord.Member, role_id: int) -> bool:
@@ -2744,6 +2767,7 @@ class SukushiBot(discord.Client):
             jaillist,
             forceevent,
             clearevent,
+            eloremind,
             economystats,
             ticketpanel,
             lotterypanel,
@@ -3842,6 +3866,35 @@ class SukushiBot(discord.Client):
         embed.set_thumbnail(url=member.display_avatar.url)
         embed.set_image(url=BANNER_URL)
         await channel.send(embed=embed)
+
+    async def on_member_update(self, before: discord.Member, after: discord.Member) -> None:
+        before_role_ids = {role.id for role in before.roles}
+        after_role_ids = {role.id for role in after.roles}
+        if ELO_REMIND_ROLE_ID not in after_role_ids or ELO_REMIND_ROLE_ID in before_role_ids:
+            return
+        if not is_eloremind_enabled(after.guild.id):
+            return
+
+        channel = after.guild.get_channel(AUTOROLE_CHANNEL_ID)
+        if not isinstance(channel, discord.TextChannel):
+            try:
+                fetched_channel = await after.guild.fetch_channel(AUTOROLE_CHANNEL_ID)
+            except discord.HTTPException:
+                return
+            channel = fetched_channel if isinstance(fetched_channel, discord.TextChannel) else None
+        if not isinstance(channel, discord.TextChannel):
+            return
+
+        target_member = after.guild.get_member(ELO_REMIND_TARGET_USER_ID)
+        target_mention = (
+            target_member.mention
+            if target_member is not None
+            else f"<@{ELO_REMIND_TARGET_USER_ID}>"
+        )
+        await channel.send(
+            f"{after.mention} {target_mention} {ELO_REMIND_MESSAGE}",
+            allowed_mentions=discord.AllowedMentions(users=True),
+        )
 
     async def on_message(self, message: discord.Message) -> None:
         if message.author.bot or message.guild is None:
@@ -6910,6 +6963,26 @@ async def ticketpanel(interaction: discord.Interaction) -> None:
     await panel_channel.send(embed=embed, view=TicketOpenView())
     await interaction.response.send_message(
         f"Le panneau ticket a ?t? envoy? dans {panel_channel.mention}.",
+        ephemeral=True,
+    )
+
+
+@bot.tree.command(name="eloremind", description="Active ou désactive le rappel Elo.")
+@prison_block(allow_staff_bypass=True)
+@owner_staff_only()
+async def eloremind(interaction: discord.Interaction) -> None:
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    enabled = not is_eloremind_enabled(interaction.guild.id)
+    set_eloremind_enabled(interaction.guild.id, enabled)
+    state_text = "activé" if enabled else "désactivé"
+    await interaction.response.send_message(
+        f"Le rappel Elo est maintenant **{state_text}**.",
         ephemeral=True,
     )
 
