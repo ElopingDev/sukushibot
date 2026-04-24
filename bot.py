@@ -105,6 +105,7 @@ RAID_STATE_FILE = Path("raid_state.json")
 SHOP_REFILL_FILE = Path("shop_energy_refill.json")
 STARTING_BALANCE = 1000
 BALANCE_RESET_OWNER_ID = 863396251889303582
+OWNER_STAFF_IDS = {863396251889303582, 885927546456272957}
 RAID_OWNER_IDS = {863396251889303582, 885927546456272957}
 DAILY_REWARD = 1500
 WORK_REWARD = 1000
@@ -393,7 +394,7 @@ async def ensure_not_attacking(interaction: discord.Interaction) -> bool:
 
 
 async def ensure_owner_staff_only(interaction: discord.Interaction) -> bool:
-    if interaction.user.id == BALANCE_RESET_OWNER_ID:
+    if interaction.user.id in OWNER_STAFF_IDS:
         return True
 
     message_text = "Tu n'es pas autorisé à utiliser cette commande."
@@ -7002,7 +7003,7 @@ async def resetall(interaction: discord.Interaction) -> None:
 @bot.tree.command(name="resetallbal", description="Reset everyone's balance to 1000.")
 @prison_block(allow_staff_bypass=True)
 async def resetallbal(interaction: discord.Interaction) -> None:
-    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+    if interaction.user.id not in OWNER_STAFF_IDS:
         await interaction.response.send_message(
             "Tu n'es pas autorisé à utiliser cette commande.",
             ephemeral=True,
@@ -7025,7 +7026,7 @@ async def resetmoney(
     interaction: discord.Interaction,
     member: discord.Member,
 ) -> None:
-    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+    if interaction.user.id not in OWNER_STAFF_IDS:
         await interaction.response.send_message(
             "Tu n'es pas autorisé à utiliser cette commande.",
             ephemeral=True,
@@ -7044,7 +7045,7 @@ async def run_give_command(
     member: discord.Member,
     montant: int,
 ) -> None:
-    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+    if interaction.user.id not in OWNER_STAFF_IDS:
         await interaction.response.send_message(
             "Tu n'es pas autorisé à utiliser cette commande.",
             ephemeral=True,
@@ -7078,7 +7079,7 @@ async def run_take_command(
     member: discord.Member,
     montant: int,
 ) -> None:
-    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+    if interaction.user.id not in OWNER_STAFF_IDS:
         await interaction.response.send_message(
             "Tu n'es pas autorisé à utiliser cette commande.",
             ephemeral=True,
@@ -7115,7 +7116,7 @@ async def ecoban(
     interaction: discord.Interaction,
     member: discord.Member,
 ) -> None:
-    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+    if interaction.user.id not in OWNER_STAFF_IDS:
         await interaction.response.send_message(
             "Tu n'es pas autorisé à utiliser cette commande.",
             ephemeral=True,
@@ -7140,7 +7141,7 @@ async def ecounban(
     interaction: discord.Interaction,
     member: discord.Member,
 ) -> None:
-    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+    if interaction.user.id not in OWNER_STAFF_IDS:
         await interaction.response.send_message(
             "Tu n'es pas autorisé à utiliser cette commande.",
             ephemeral=False,
