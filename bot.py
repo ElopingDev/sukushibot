@@ -2428,40 +2428,6 @@ class TicketCloseView(discord.ui.View):
         await interaction.channel.delete(reason=f"Ticket fermé par {interaction.user}")
 
 
-@bot.tree.command(name="ticketpanel", description="Envoie le panneau des tickets.")
-@prison_block(allow_staff_bypass=True)
-@owner_staff_only()
-async def ticketpanel(interaction: discord.Interaction) -> None:
-    if interaction.guild is None:
-        await interaction.response.send_message(
-            "Cette commande doit ?tre utilis?e dans le serveur.",
-            ephemeral=True,
-        )
-        return
-
-    panel_channel = interaction.guild.get_channel(TICKET_PANEL_CHANNEL_ID)
-    if not isinstance(panel_channel, discord.TextChannel):
-        await interaction.response.send_message(
-            "Le salon du panneau ticket est introuvable.",
-            ephemeral=True,
-        )
-        return
-
-    embed = make_embed(
-        "Tickets Sukushi",
-        "Besoin d'aide, d'un signalement ou d'un contact avec le staff ?\nClique sur le bouton ci-dessous pour ouvrir un ticket privé.",
-        color=SUKUSHI_PINK,
-        footer="Sukushi bot | Tickets",
-    )
-    embed.set_image(url=BANNER_URL)
-
-    await panel_channel.send(embed=embed, view=TicketOpenView())
-    await interaction.response.send_message(
-        f"Le panneau ticket a ?t? envoy? dans {panel_channel.mention}.",
-        ephemeral=True,
-    )
-
-
 class LotteryView(discord.ui.View):
     def __init__(self) -> None:
         super().__init__(timeout=None)
@@ -6899,6 +6865,39 @@ async def economystats(interaction: discord.Interaction) -> None:
     embed.add_field(name="Top net", value=format_stat_lines(net_sorted, mode="net"), inline=False)
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
+
+@bot.tree.command(name="ticketpanel", description="Envoie le panneau des tickets.")
+@prison_block(allow_staff_bypass=True)
+@owner_staff_only()
+async def ticketpanel(interaction: discord.Interaction) -> None:
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit ?tre utilis?e dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    panel_channel = interaction.guild.get_channel(TICKET_PANEL_CHANNEL_ID)
+    if not isinstance(panel_channel, discord.TextChannel):
+        await interaction.response.send_message(
+            "Le salon du panneau ticket est introuvable.",
+            ephemeral=True,
+        )
+        return
+
+    embed = make_embed(
+        "Tickets Sukushi",
+        "Besoin d'aide, d'un signalement ou d'un contact avec le staff ?\nClique sur le bouton ci-dessous pour ouvrir un ticket privé.",
+        color=SUKUSHI_PINK,
+        footer="Sukushi bot | Tickets",
+    )
+    embed.set_image(url=BANNER_URL)
+
+    await panel_channel.send(embed=embed, view=TicketOpenView())
+    await interaction.response.send_message(
+        f"Le panneau ticket a ?t? envoy? dans {panel_channel.mention}.",
+        ephemeral=True,
+    )
 
 @bot.tree.command(name="lotterypanel", description="Envoie le panneau de la loterie.")
 @prison_block(allow_staff_bypass=True)
