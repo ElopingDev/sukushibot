@@ -6530,18 +6530,7 @@ async def mute(
         )
         return
 
-    bypass_moderator_hierarchy = moderator.id == 1413219359555584121
     allowed, message = can_act_on_target(moderator, member, bot_member)
-    if (
-        not allowed
-        and bypass_moderator_hierarchy
-        and message == "Vous ne pouvez agir que sur des membres situés sous votre rôle principal."
-        and bot_member.top_role > member.top_role
-        and member.id != moderator.id
-        and member.id != bot_member.id
-        and member.guild.owner_id != member.id
-    ):
-        allowed, message = True, None
     if not allowed:
         await interaction.response.send_message(message)
         return
@@ -6585,18 +6574,7 @@ async def jail(
         )
         return
 
-    bypass_moderator_hierarchy = moderator.id == 1413219359555584121
     allowed, message = can_act_on_target(moderator, member, bot_member)
-    if (
-        not allowed
-        and bypass_moderator_hierarchy
-        and message == "Vous ne pouvez agir que sur des membres situés sous votre rôle principal."
-        and bot_member.top_role > member.top_role
-        and member.id != moderator.id
-        and member.id != bot_member.id
-        and member.guild.owner_id != member.id
-    ):
-        allowed, message = True, None
     if not allowed:
         await interaction.response.send_message(message)
         return
@@ -6644,7 +6622,18 @@ async def unmute(
         )
         return
 
+    bypass_moderator_hierarchy = moderator.id == 885927546456272957
     allowed, message = can_act_on_target(moderator, member, bot_member)
+    if (
+        not allowed
+        and bypass_moderator_hierarchy
+        and message == "Vous ne pouvez agir que sur des membres situés sous votre rôle principal."
+        and bot_member.top_role > member.top_role
+        and member.id != moderator.id
+        and member.id != bot_member.id
+        and member.guild.owner_id != member.id
+    ):
+        allowed, message = True, None
     if not allowed:
         await interaction.response.send_message(message)
         return
@@ -6681,7 +6670,18 @@ async def kick(
         )
         return
 
+    bypass_moderator_hierarchy = moderator.id == 885927546456272957
     allowed, message = can_act_on_target(moderator, member, bot_member)
+    if (
+        not allowed
+        and bypass_moderator_hierarchy
+        and message == "Vous ne pouvez agir que sur des membres situés sous votre rôle principal."
+        and bot_member.top_role > member.top_role
+        and member.id != moderator.id
+        and member.id != bot_member.id
+        and member.guild.owner_id != member.id
+    ):
+        allowed, message = True, None
     if not allowed:
         await interaction.response.send_message(message)
         return
