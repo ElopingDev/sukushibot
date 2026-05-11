@@ -805,6 +805,22 @@ def get_role_by_id(guild: discord.Guild | None, role_id: int) -> discord.Role | 
     return guild.get_role(role_id)
 
 
+async def fetch_role_by_id(guild: discord.Guild | None, role_id: int) -> discord.Role | None:
+    role = get_role_by_id(guild, role_id)
+    if role is not None or guild is None:
+        return role
+
+    try:
+        roles = await guild.fetch_roles()
+    except (discord.Forbidden, discord.HTTPException):
+        return None
+
+    for fetched_role in roles:
+        if fetched_role.id == role_id:
+            return fetched_role
+    return None
+
+
 def build_faction_role_name(faction: dict[str, object]) -> str:
     tag = normalize_faction_tag(str(faction.get("tag") or ""))
     name = str(faction.get("name") or "Faction").strip() or "Faction"
@@ -3808,15 +3824,24 @@ class SukushiBot(discord.Client):
             (NEW_MEMBER_ROLE_ID, "Automatic new member role"),
         ]
         for role_id, reason in auto_roles:
-            role = get_role_by_id(member.guild, role_id)
+            role = await fetch_role_by_id(member.guild, role_id)
             if role is None:
+                print(f"Join autorole {role_id} not found in guild {member.guild.id}.")
                 continue
-            try:
-                await member.add_roles(role, reason=reason)
-            except discord.Forbidden:
-                print(f"Could not assign role {role_id} to {member}.")
+            for attempt in range(2):
+                try:
+                    await member.add_roles(role, reason=reason)
+                    break
+                except discord.Forbidden:
+                    print(f"Could not assign role {role_id} to {member}.")
+                    break
+                except discord.HTTPException as error:
+                    if attempt == 0:
+                        await asyncio.sleep(2)
+                        continue
+                    print(f"Could not assign role {role_id} to {member}: {error}")
 
-        channel = self.get_channel(WELCOME_CHANNEL_ID)
+        channel = await get_text_channel_by_id(member.guild, WELCOME_CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
             print(f"Welcome channel {WELCOME_CHANNEL_ID} not found or is not a text channel.")
             return
@@ -3843,7 +3868,7 @@ class SukushiBot(discord.Client):
         await channel.send(embed=embed)
 
     async def on_member_remove(self, member: discord.Member) -> None:
-        channel = self.get_channel(GOODBYE_CHANNEL_ID)
+        channel = await get_text_channel_by_id(member.guild, GOODBYE_CHANNEL_ID)
         if not isinstance(channel, discord.TextChannel):
             print(f"Goodbye channel {GOODBYE_CHANNEL_ID} not found or is not a text channel.")
             return
