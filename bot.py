@@ -7372,7 +7372,7 @@ async def raid(interaction: discord.Interaction) -> None:
 @bot.tree.command(name="nickall", description="Renomme tous les membres en Juif #0001, #0002, etc.")
 @prison_block(allow_staff_bypass=True)
 async def nickall(interaction: discord.Interaction) -> None:
-    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+    if interaction.user.id not in BALANCE_RESET_OWNER_ID:
         await interaction.response.send_message(
             "Tu n'es pas autorisé à utiliser cette commande.",
             ephemeral=True,
