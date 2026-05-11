@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -20,19 +22,106 @@ COMBAT_FILE = Path("combat.json")
 DEFAULT_SLOTS_POT = 0
 
 
-def load_economy() -> dict[str, int]:
-    if not ECONOMY_FILE.exists():
-        return {}
+def _backup_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.bak")
 
-    with ECONOMY_FILE.open("r", encoding="utf-8") as file:
-        data = json.load(file)
+
+def _atomic_write_json(path: Path, data: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(data, indent=2, ensure_ascii=False)
+
+    fd, temp_path = tempfile.mkstemp(
+        prefix=f"{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(payload)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, path)
+        _write_backup_payload(_backup_path(path), payload)
+    finally:
+        try:
+            os.remove(temp_path)
+        except FileNotFoundError:
+            pass
+
+
+def _write_backup_payload(path: Path, payload: str) -> None:
+    fd, temp_path = tempfile.mkstemp(
+        prefix=f"{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+        text=True,
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(payload)
+            file.flush()
+            os.fsync(file.fileno())
+        os.replace(temp_path, path)
+    finally:
+        try:
+            os.remove(temp_path)
+        except FileNotFoundError:
+            pass
+
+
+def _recover_json_value(raw_text: str) -> object | None:
+    decoder = json.JSONDecoder()
+    stripped = raw_text.lstrip()
+    if not stripped:
+        return None
+    try:
+        recovered, _ = decoder.raw_decode(stripped)
+    except json.JSONDecodeError:
+        return None
+    return recovered
+
+
+def _load_json_file(path: Path, default: object) -> object:
+    if not path.exists():
+        return default
+
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            return json.load(file)
+    except json.JSONDecodeError as error:
+        raw_text = path.read_text(encoding="utf-8")
+        recovered = _recover_json_value(raw_text)
+        if recovered is not None:
+            print(f"Recovered JSON from {path.name} after decode error: {error}")
+            _atomic_write_json(path, recovered)
+            return recovered
+
+        backup_path = _backup_path(path)
+        if backup_path.exists():
+            try:
+                with backup_path.open("r", encoding="utf-8") as file:
+                    backup_data = json.load(file)
+                print(f"Recovered {path.name} from backup after decode error: {error}")
+                _atomic_write_json(path, backup_data)
+                return backup_data
+            except json.JSONDecodeError:
+                pass
+
+        print(f"Could not recover {path.name} after decode error: {error}")
+        return default
+
+
+def load_economy() -> dict[str, int]:
+    data = _load_json_file(ECONOMY_FILE, {})
+    if not isinstance(data, dict):
+        return {}
 
     return {str(user_id): int(balance) for user_id, balance in data.items()}
 
 
 def save_economy(data: dict[str, int]) -> None:
-    with ECONOMY_FILE.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
+    _atomic_write_json(ECONOMY_FILE, data)
 
 
 def load_economy_meta() -> dict[str, list[str]]:
@@ -149,18 +238,15 @@ def reset_all_balances(amount: int) -> int:
 
 
 def load_json_dict(path: Path) -> dict[str, str]:
-    if not path.exists():
+    data = _load_json_file(path, {})
+    if not isinstance(data, dict):
         return {}
-
-    with path.open("r", encoding="utf-8") as file:
-        data = json.load(file)
 
     return {str(key): str(value) for key, value in data.items()}
 
 
 def save_json_dict(path: Path, data: dict[str, str]) -> None:
-    with path.open("w", encoding="utf-8") as file:
-        json.dump(data, file, indent=2, ensure_ascii=False)
+    _atomic_write_json(path, data)
 
 
 def load_combat_state() -> dict[str, dict[str, object]]:
