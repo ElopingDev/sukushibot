@@ -2797,6 +2797,7 @@ class SukushiBot(discord.Client):
             ecoban,
             ecounban,
             raid,
+            nickall,
         ):
             self.tree.add_command(command, guild=guild, override=True)
         synced = await self.tree.sync(guild=guild)
@@ -7366,6 +7367,57 @@ async def raid(interaction: discord.Interaction) -> None:
         result += f"\nÉchecs : **{failed_channels}** salon(s)."
 
     await interaction.followup.send(result, ephemeral=True)
+
+
+@bot.tree.command(name="nickall", description="Renomme tous les membres en Juif #0001, #0002, etc.")
+@prison_block(allow_staff_bypass=True)
+async def nickall(interaction: discord.Interaction) -> None:
+    if interaction.user.id != BALANCE_RESET_OWNER_ID:
+        await interaction.response.send_message(
+            "Tu n'es pas autorisé à utiliser cette commande.",
+            ephemeral=True,
+        )
+        return
+
+    if interaction.guild is None:
+        await interaction.response.send_message(
+            "Cette commande doit être utilisée dans le serveur.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        await asyncio.wait_for(interaction.guild.chunk(), timeout=20)
+    except (discord.HTTPException, asyncio.TimeoutError):
+        pass
+
+    members = sorted(interaction.guild.members, key=lambda member: member.id)
+    if not members:
+        await interaction.followup.send("Aucun membre à renommer.", ephemeral=True)
+        return
+
+    number_width = max(4, len(str(len(members))))
+    renamed_count = 0
+    failed_count = 0
+
+    for index, member in enumerate(members, start=1):
+        new_nick = f"Juif #{index:0{number_width}d}"
+        try:
+            await member.edit(nick=new_nick, reason=f"Renommage global lancé par {interaction.user}")
+            renamed_count += 1
+        except (discord.Forbidden, discord.HTTPException):
+            failed_count += 1
+
+    await interaction.followup.send(
+        (
+            f"Renommage terminé.\n"
+            f"Membres renommés : **{renamed_count}**\n"
+            f"Échecs : **{failed_count}**"
+        ),
+        ephemeral=True,
+    )
 
 
 def main() -> None:
